@@ -382,11 +382,13 @@ Elevated:
 .\Uninstall-GpuUnlockBoot.ps1
 ```
 
-Restores official `bootmgfw.efi` from `bootmgfw_ms.efi` and removes the scheduled task. Also delete `EFI\turing-unlock`:
+Restores official `bootmgfw.efi` from `bootmgfw_ms.efi` and removes the scheduled task. The on-disk folder name stays `EFI\turing-unlock` (loader path). Without `-Purge` that folder is kept (loader copy, bootmgfw backups, **firmware blobs**).
 
 ```powershell
 .\Uninstall-GpuUnlockBoot.ps1 -Purge
 ```
+
+`-Purge` deletes `EFI\turing-unlock\` recursively (including `firmware\*.bin`), `EFI\Microsoft\Boot\bootmgfw_ms.efi`, and `C:\ProgramData\GpuUnlock`. It prints the firmware file list before removing it.
 
 ### B. Windows will not boot, ESP files are intact (prefer this)
 

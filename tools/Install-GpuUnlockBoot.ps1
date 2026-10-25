@@ -146,5 +146,5 @@ Write-Host ''
 Write-Host 'Install complete.'
 Write-Host "  Wrapper : $MsBoot"
 Write-Host "  Original: $backup"
-Write-Host 'Reboot the VM. Default menu action is SKIP. Press I to exercise inject (no GPU => no MMIO).'
-Write-Host 'Rollback: Uninstall-GpuUnlockBoot.ps1'
+Write-Host 'Reboot. Default menu action is SKIP. Press I to inject when a GPU of the built arch is present.'
+Write-Host 'Rollback: Uninstall-GpuUnlockBoot.ps1  (add -Purge to delete EFI\turing-unlock including firmware blobs)'

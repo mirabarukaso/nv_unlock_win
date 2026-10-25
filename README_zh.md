@@ -382,11 +382,13 @@ Windows 起来后，`GpuUnlock Boot Guard` 会把包装器写回 `bootmgfw.efi`�
 .\Uninstall-GpuUnlockBoot.ps1
 ```
 
-从 `bootmgfw_ms.efi` 恢复官方 `bootmgfw.efi`，并删除计划任务。连 `EFI\turing-unlock` 一起删：
+从 `bootmgfw_ms.efi` 恢复官方 `bootmgfw.efi`，并删除计划任务。ESP 上目录名仍是 `EFI\turing-unlock`（loader 路径）。不加 `-Purge` 会留下这个目录（loader 副本、bootmgfw 备份、**firmware blob**）。
 
 ```powershell
 .\Uninstall-GpuUnlockBoot.ps1 -Purge
 ```
+
+`-Purge` 会递归删除 `EFI\turing-unlock\`（含 `firmware\*.bin`）、`EFI\Microsoft\Boot\bootmgfw_ms.efi` 以及 `C:\ProgramData\GpuUnlock`。删之前会打印 firmware 文件列表。
 
 ### B. 进不了 Windows，但 ESP 文件还在（优先用这个）
 
