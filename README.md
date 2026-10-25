@@ -1,7 +1,9 @@
 > [!IMPORTANT]
-> NOT FULLY TEST!
+> NOT FULLY TEST!            
 > Only test and verify on Titan RTX(Turing, Windows 10) and Hyper-V (Windows 10) with secure boot disabled      
 >
+
+[中文README](README_zh.md)
 
 # GPU Unlock UEFI loader (Windows)
 
