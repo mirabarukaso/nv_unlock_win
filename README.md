@@ -32,17 +32,18 @@ Version: `0.2.3` (menu title `GPU Unlock Loader 0.2.3 (<Arch>)`). License: GPL-2
 3. [Download the toolchain](#download-the-toolchain)
 4. [Prepare](#prepare)
 5. [Build](#build)
-6. [Clear](#clear)
-7. [Hyper-V guest](#hyper-v-guest)
-8. [Install](#install)
-9. [Boot menu](#boot-menu)
-10. [Uninstall and recovery](#uninstall-and-recovery)
-11. [Rebuild the ESP from Windows setup / USB](#rebuild-the-esp-from-windows-setup--usb)
-12. [Benchmark](#benchmark)
-13. [Inject on real hardware](#inject-on-real-hardware)
-14. [Troubleshooting](#troubleshooting)
-15. [License](#license)
-16. [Layout](#layout)
+6. [Firmware blobs](#firmware-blobs)
+7. [Clear](#clear)
+8. [Hyper-V guest](#hyper-v-guest)
+9. [Install](#install)
+10. [Boot menu](#boot-menu)
+11. [Uninstall and recovery](#uninstall-and-recovery)
+12. [Rebuild the ESP from Windows setup / USB](#rebuild-the-esp-from-windows-setup--usb)
+13. [Benchmark](#benchmark)
+14. [Inject on real hardware](#inject-on-real-hardware)
+15. [Troubleshooting](#troubleshooting)
+16. [License](#license)
+17. [Layout](#layout)
 
 ---
 
@@ -70,7 +71,7 @@ Build on a **Windows machine with Visual Studio** (it does not have to be the ta
 | --- | --- |
 | OS | Windows 10/11 x64 |
 | Visual Studio 2022 | workload **Desktop development with C++**, MSVC v143 x64 |
-| Python | 3.6+ (`py -3` or `python` on PATH) |
+| Python | 3.6+ (`py -3` or `python` on PATH). Firmware generate also needs `pip install zstandard` |
 | Git | to clone EDK2 |
 | Disk | a full EDK2 tree is several GB |
 | Target VM | Hyper-V **Generation 2**, Windows 10/11 x64, administrator account |
@@ -176,7 +177,7 @@ What it prepares:
 - Removes a leftover `edk2\TuringUnlockPkg` junction from older trees
 - Copies EDK2 `Conf\*.txt` from BaseTools templates when missing
 - Creates `.\build`
-- If `assets\firmware\<Arch>\` already has that arch's blobs (from `Build-GpuUnlockFirmware.ps1`), reports them staged. This tree does not search sibling Linux repos.
+- If `assets\firmware\<Arch>\` already has that arch's blobs (from [Firmware blobs](#firmware-blobs)), reports them staged. This tree does not search sibling Linux repos.
 
 If EDK2 or NASM is missing, fetch them (git / zip) instead of doing it by hand:
 
@@ -229,6 +230,42 @@ TuringUnlockLoader.efi noload
 ```
 
 `noload` stays in the loader after the menu. `inject` / `skip` skip the menu.
+
+---
+
+## Firmware blobs
+
+NVIDIA firmware is **not** in git. Hyper-V skip-inject does not need it. Real-hardware inject reads `\EFI\turing-unlock\firmware\` on the ESP; missing files fail **before** MMIO (`firmware missing` / `load_fw error=-2`).
+
+Each arch has its own pinned **610.43.03** set. Turing blobs do not unlock Ampere or Ada. TITAN RTX is TU102: generate **Turing** only.
+
+### What the fetch step downloads
+
+`tools\Build-GpuUnlockFirmware.ps1` runs `firmware\<arch>\fetch_artifacts.py`. URLs and SHA-256 are in `firmware\<arch>\artifacts-610.43.03.json` (Ada also has `ada-610.43.03.json`). The script only accepts a file whose hash matches the pin. Nothing downloaded is executed; our generators only extract and write blobs.
+
+| Input | Source (pinned) | Used for |
+| --- | --- | --- |
+| `NVIDIA-kernel-module-source-610.43.03.tar.xz` | NVIDIA open kernel module source (`download.nvidia.com`) | Booter / GSP boot / SEC2 images decoded from generated C |
+| `nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst` | CachyOS archive of that exact package | `gsp_tu10x.bin` or `gsp_ga10x.bin`, plus `NVIDIA-LICENSE` |
+
+The V67 payload (`v67-*-610.43.03*.bin`) is generated locally from the upstream script. It is not an NVIDIA redistributable.
+
+Cache (gitignored): `uefi\.cache\firmware\`. Output (gitignored): `uefi\assets\firmware\<Arch>\`. Do not commit `*.bin` or `NVIDIA-LICENSE`.
+
+### Generate (from this `uefi/` directory)
+
+Needs Python 3.6+ and the `zstandard` package (Windows has no `zstd`/`xz` by default; the wrapper uses Python `tarfile` + `zstandard`).
+
+```powershell
+python -m pip install zstandard
+powershell -ExecutionPolicy Bypass -File .\tools\Build-GpuUnlockFirmware.ps1 -Arch Turing
+```
+
+Ampere / Ada: `-Arch Ampere` or `-Arch Ada`. `-Offline` rechecks files already in the cache without HTTPS. `-CacheDir` / `-OutputDir` override paths.
+
+The NVIDIA Driver License Agreement in the utils package still covers the extracted firmware. Personal local packaging is the intended use; this tree does **not** claim redistribution rights. See `firmware\<arch>\NOTICE.md`.
+
+Copy onto the ESP at Install time (`-FirmwareDir .\assets\firmware\Turing`, or omit it when the loader is named `UnlockLoader-<Arch>.efi` and that folder already has `.bin` files). File lists: [Inject on real hardware](#inject-on-real-hardware). More detail: [firmware/README.md](firmware/README.md).
 
 ---
 
@@ -467,18 +504,7 @@ Tested on this host **NVIDIA TITAN RTX** (`10de:1e02`, full 72-SM TU102), loader
 
 Inject on a card that needs unlocking (GeForce 2080 Ti, Ampere, Ada) is **not** validated here. Use at your own risk. Full-speed tensor cores draw a lot of power and can damage hardware.
 
-Each architecture needs its **own** blob set. Turing blobs do not work on Ampere or Ada. Generate only the arch you will inject; TITAN RTX is TU102 so Turing is enough.
-
-From this `uefi/` directory (no parent Linux tree required):
-
-```powershell
-python -m pip install zstandard
-powershell -ExecutionPolicy Bypass -File .\tools\Build-GpuUnlockFirmware.ps1 -Arch Turing
-```
-
-That writes `assets\firmware\Turing\`. Ampere / Ada use `-Arch Ampere` or `-Arch Ada` into `assets\firmware\<Arch>\`. Details: [firmware/README.md](firmware/README.md).
-
-Without those files the inject path errors out **before** FLR/MMIO. A VM has no card, so they are optional there.
+Each architecture needs its **own** blob set. How to fetch and generate them is in [Firmware blobs](#firmware-blobs). TITAN RTX is TU102; Turing is enough. Without those files the inject path errors out **before** FLR/MMIO. A VM has no card, so they are optional there.
 
 Turing (`-Arch Turing`; success path writes SS0=`0x88888888`, SS1=`0x8`, then **does not FLR**):
 
