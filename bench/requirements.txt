@@ -1,0 +1,3 @@
+# CUDA build of PyTorch. Install from https://pytorch.org/get-started/locally/
+# if the default wheel has no GPU.
+torch

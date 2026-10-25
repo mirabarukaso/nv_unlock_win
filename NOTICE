@@ -1,0 +1,19 @@
+GPU Unlock UEFI loader
+Copyright (C) 2026 the GPU Unlock UEFI contributors
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, version 2 only. See LICENSE.
+
+This tree is a Windows UEFI port of three GPL-2.0-only Linux modules:
+
+  Turing  https://github.com/nlzy/turing-unlock
+  Ampere  https://github.com/Zagitta/gpu-unlock
+  Ada     https://github.com/JustAResearcher/gpu-unlock-ada
+
+Keep the GPL-2.0-only notices on modified files. NVIDIA firmware blobs
+are not shipped here and remain under NVIDIA's license; see
+firmware/<arch>/NOTICE.md. Generators under firmware/turing, firmware/ampere,
+and firmware/ada are copied from those upstreams so this directory can ship
+as its own repository. NVIDIA header contracts inspected during the loader
+audit are MIT; see those upstreams' licenses/NVIDIA-MIT.txt.

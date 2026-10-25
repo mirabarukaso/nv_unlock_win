@@ -1,0 +1,17 @@
+## @file
+#  GPU unlock UEFI loader: common boot wrapper plus per-arch inject backends.
+#
+#  SPDX-License-Identifier: GPL-2.0-only
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001B
+  PACKAGE_NAME                   = GpuUnlockPkg
+  PACKAGE_GUID                   = C5A12F08-44E1-4B9A-A6D3-0F8E21C7A112
+  PACKAGE_VERSION                = 0.2.3
+
+[Includes]
+  Include
+  Arch/Turing
+  Arch/Ampere
+  Arch/Ada

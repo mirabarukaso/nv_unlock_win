@@ -1,0 +1,63 @@
+## @file
+#  GPU unlock UEFI loader - Ada backend.
+#
+#  SPDX-License-Identifier: GPL-2.0-only
+##
+
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = TuringUnlockLoader
+  FILE_GUID                      = B3C91E44-6D70-4A11-9E2C-77A1B0C4D801
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 0.2.3
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  Loader.c
+  Log.c
+  Fs.c
+  Config.c
+  Pci.c
+  Menu.c
+  Chainload.c
+  Arch.c
+  ../../Arch/Ada/Ada.c
+  ../../Arch/Ada/Unlock.c
+  ../../Arch/Ada/Portable/gfw_eval.c
+  ../../Arch/Ada/Portable/layout.c
+  ../../Arch/Ada/Portable/prep.c
+  ../../Arch/Ada/Portable/vbios.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  GpuUnlockPkg/GpuUnlockPkg.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  BaseLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  PrintLib
+  DebugLib
+  DevicePathLib
+  CacheMaintenanceLib
+  PcdLib
+
+[Protocols]
+  gEfiPciIoProtocolGuid
+  gEfiPciRootBridgeIoProtocolGuid
+  gEfiSimpleTextInProtocolGuid
+  gEfiLoadedImageProtocolGuid
+  gEfiLoadedImageDevicePathProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+
+[Guids]
+  gEfiFileInfoGuid
+
+[BuildOptions]
+  MSFT:*_*_*_CC_FLAGS = /wd4201 /wd4214 /DTU_BUILD_ARCH_ADA

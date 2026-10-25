@@ -1,0 +1,42 @@
+# Toolchain clones — download locally, do not commit
+/edk2/
+/nasm/
+/nasm-*/
+
+# NVIDIA firmware blobs staged by Prepare / Build-GpuUnlockFirmware (not shipped in git)
+/assets/firmware/*.bin
+/assets/firmware/**/*.bin
+/assets/firmware/**/NVIDIA-LICENSE
+/.cache/
+
+# Build products
+/build/
+*.efi
+*.pdb
+*.map
+*.dll
+*.lib
+*.obj
+*.i
+*.ii
+*.deps
+
+# EDK2 workspace if someone points PACKAGES_PATH here
+/Build/
+/Conf/BuildEnv.sh
+*_build_report.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vs/
+.vscode/
+*.suo
+*.user
+Thumbs.db
+Desktop.ini
+.DS_Store
