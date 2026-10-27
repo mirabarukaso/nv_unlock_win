@@ -23,7 +23,9 @@
 - 实机 **NVIDIA TITAN RTX**（完整 72 SM TU102）：先跑库存 FP16 GEMM，再做一次 UEFI 强制注入（`I`，`10de:1e02`）。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。进 Windows 后 GEMM 与库存一致（噪声范围内），见 [Benchmark](#benchmark)。TITAN 出厂已是满 SM，不会出现 2080 Ti 那种大约 1.5 倍。
 - 其它实机（2080 Ti、Ampere、Ada）上的 UEFI 注入 **尚未** 在本树验证。
 
-版本：`0.2.3`（菜单标题 `GPU Unlock Loader 0.2.3 (<Arch>)`）。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+版本：`0.2.4`（菜单标题 `GPU Unlock Loader 0.2.4 (<Arch>)`）。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+
+`0.2.4` 对应 [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1) 里的构建问题：EDK2 固定到 `edk2-stable202608`，仓库带上 `assets\config.ini`，loader 在进 Windows 前把一行 `handoff` 写入 `unlock.log`。2080 Ti 仍需要复测。这张 TITAN RTX 看不出 SS 写入是否生效，也看不出驱动是不是因为设备 ID `10de:1e02` 才没有拒绝。
 
 ---
 
@@ -228,7 +230,7 @@ Ada 用 AD102 系列 Linux 事务（four-PLM V67，成功后 FLR）。Ampere 用
 
 `iasl`、CLANG、Cygwin 的提示可以忽略，本应用用不到。以前那行 `Cannot find BaseTools Bin Win32` 是 `toolsetup.bat` 延迟展开的误报；现在编译脚本会先设置 `EDK_TOOLS_BIN`。
 
-成功后再编一次是增量的，大约几秒。菜单里的版本字符串必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.3`），并且对应当前编译的架构。
+成功后再编一次是增量的，大约几秒。菜单里的版本字符串必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.4`），并且对应当前编译的架构。
 
 用 EFI shell 冒烟、先不替换 bootmgr：
 
@@ -301,7 +303,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
    - 取消 **Enable Secure Boot**
 3. 把 `build\UnlockLoader-Turing.efi` 和整个 `tools\` 拷进虚拟机（共享盘、ISO 或 `Copy-VMFile`）。
 4. 虚拟机里用 **管理员** PowerShell 跑下一节的安装命令。
-5. 重启。应看到 `GPU Unlock Loader 0.2.3 (Turing)`。直接回车或等超时，应进入 Windows。
+5. 重启。应看到 `GPU Unlock Loader 0.2.4 (Turing)`。直接回车或等超时，应进入 Windows。
 
 虚拟机没有 NVIDIA 直通时，Inject 也是安全的：`gpu_count=0`，不写 MMIO。
 
@@ -343,14 +345,14 @@ powershell -ExecutionPolicy Bypass -File .\Install-GpuUnlockBoot.ps1 -LoaderEfi 
 | `-SkipScheduledTask` | 不注册保护任务 |
 | `-FirmwareDir <dir>` | 把该架构的 blob 拷到 ESP 的 `firmware\`（实机注入才需要） |
 
-**每次重新编译后都要再跑一次安装**，否则 ESP 上还是旧包装器。菜单标题必须对应当前编译的架构，例如 `0.2.3 (Turing)`。
+**每次重新编译后都要再跑一次安装**，否则 ESP 上还是旧包装器。菜单标题必须对应当前编译的架构，例如 `0.2.4 (Turing)`。
 
 ---
 
 ## 启动菜单
 
 ```
-GPU Unlock Loader 0.2.3 (Turing)
+GPU Unlock Loader 0.2.4 (Turing)
 NVIDIA display GPUs: 1  (feat read-only until I)
   0000:65:00.0  10de:1e02  Turing  (I forces)
     PLM=fffffff8  SS0=00000000  SS1=00000007  RO=00000000
@@ -563,7 +565,7 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
 | 固件直接进 Windows，没有菜单 | 这一次用的是还原后的微软 `bootmgfw.efi`，或 SB 仍开，或包装器没了 | loader/WU 还原后这一轮没有菜单是预期；下次重启应出现。若仍没有：关 SB，跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask`，或重装 |
 | `LoadImage failed F` / `Access Denied (0x800000000000000F)` | 旧 loader 用内存 buffer + NULL 路径加载 | 使用 0.1.1+，重装 |
 | 恢复蓝屏 `0xc0000428` | CI 校验到的 `bootmgfw.efi` 还是未签名包装器 | 使用 0.1.2+（先 restore 再 chainload）；或按 [B](#b-进不了-windows但-esp-文件还在优先用这个) copy 备份 |
-| 菜单不是 `0.2.3 (<Arch>)` | ESP 上还是旧 EFI | 再跑 Install |
+| 菜单不是 `0.2.4 (<Arch>)` | ESP 上还是旧 EFI | 再跑 Install |
 | 菜单里键盘没反应（快速 POST） | 固件没启动 USB xHCI | 0.2.3+ 进菜单前会 Connect USB 主机；重装 |
 | `firmware missing (status=e)` / `load_fw error=-2` | ESP 上没有当前架构的 blob | 跑 `Build-GpuUnlockFirmware.ps1 -Arch <Arch>`，再 Install `-FirmwareDir .\assets\firmware\<Arch>` |
 | 进一次 Windows 后菜单消失 | 保护任务还没跑，或根本没注册 | 登录后等约 1 分钟（看 `C:\ProgramData\GpuUnlock\protect.log`），或管理员跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
@@ -605,7 +607,7 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
   edk2/                    本地下载，不入库
   LICENSE                  GPL-2.0-only
   NOTICE                   三个上游 Linux 模块的署名
-  VERSION                  0.2.3
+  VERSION                  0.2.4
   README.md                英文
   README_zh.md             中文
 ```

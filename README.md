@@ -23,7 +23,9 @@ Linux module sources this tree ports:
 - On a host **NVIDIA TITAN RTX** (full 72-SM TU102): stock FP16 GEMM, then one UEFI force-inject (`I` on `10de:1e02`). Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. After Windows, GEMM matched stock within noise — see [Benchmark](#benchmark). TITAN is already factory-full; inject does not add the ~1.5x seen on 2080 Ti.
 - UEFI inject on any other real card (2080 Ti, Ampere, Ada) is **not** validated here.
 
-Version: `0.2.3` (menu title `GPU Unlock Loader 0.2.3 (<Arch>)`). License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Version: `0.2.4` (menu title `GPU Unlock Loader 0.2.4 (<Arch>)`). License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+`0.2.4` answers the build notes in [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1): the EDK2 pin is `edk2-stable202608`, `assets\config.ini` is in the tree, and the loader writes a `handoff` line to `unlock.log` before Windows. A 2080 Ti retest is still required. This TITAN RTX cannot show whether the SS write takes effect, or whether the driver accepts that state only because the device ID is `10de:1e02`.
 
 ---
 
@@ -228,7 +230,7 @@ Optional arguments:
 
 Warnings about `iasl`, CLANG, and Cygwin are safe to ignore for this application. The old `Cannot find BaseTools Bin Win32` line was a false error from `toolsetup.bat` delayed expansion; the build script now sets `EDK_TOOLS_BIN` first.
 
-A second build is incremental and takes a few seconds. The version string in the menu must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.3`) and the arch you built.
+A second build is incremental and takes a few seconds. The version string in the menu must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.4`) and the arch you built.
 
 EFI shell smoke test without replacing bootmgr:
 
@@ -301,7 +303,7 @@ Install / skip / enter-Windows was tested in this setup. Real-GPU inject was not
    - Clear **Enable Secure Boot**
 3. Copy `build\UnlockLoader-Turing.efi` and the whole `tools\` folder into the guest (shared disk, ISO, or `Copy-VMFile`).
 4. In the guest, run the install command from the next section in an **elevated** PowerShell.
-5. Reboot. The menu should say `GPU Unlock Loader 0.2.3 (Turing)`. Press Enter or wait out the timeout; Windows should start.
+5. Reboot. The menu should say `GPU Unlock Loader 0.2.4 (Turing)`. Press Enter or wait out the timeout; Windows should start.
 
 With no NVIDIA GPU passed through, Inject is still safe: `gpu_count=0`, no MMIO.
 
@@ -343,14 +345,14 @@ Useful parameters:
 | `-SkipScheduledTask` | do not register the protect task |
 | `-FirmwareDir <dir>` | copy that arch's blobs onto the ESP `firmware\` directory (needed only for real-hardware inject) |
 
-**Re-run install after every rebuild**, or the ESP still has the old wrapper. The menu title must match the arch you built, for example `0.2.3 (Turing)`.
+**Re-run install after every rebuild**, or the ESP still has the old wrapper. The menu title must match the arch you built, for example `0.2.4 (Turing)`.
 
 ---
 
 ## Boot menu
 
 ```
-GPU Unlock Loader 0.2.3 (Turing)
+GPU Unlock Loader 0.2.4 (Turing)
 NVIDIA display GPUs: 1  (feat read-only until I)
   0000:65:00.0  10de:1e02  Turing  (I forces)
     PLM=fffffff8  SS0=00000000  SS1=00000007  RO=00000000
@@ -563,7 +565,7 @@ Firmware binaries remain under the NVIDIA license. See `firmware/<arch>/NOTICE.m
 | Firmware boots Windows with no menu | this boot used the restored Microsoft `bootmgfw.efi`, or Secure Boot is on, or the wrapper is gone | expected once after a loader/WU restore; next reboot should show the menu. If it still skips: turn SB off, run `Protect-GpuUnlockBoot.ps1 -RegisterTask`, or reinstall |
 | `LoadImage failed F` / `Access Denied (0x800000000000000F)` | old loader used a memory buffer with a NULL path | use 0.1.1+, reinstall |
 | Recovery `0xc0000428` | CI hashed unsigned wrapper at `bootmgfw.efi` | use 0.1.2+ (restore then chainload), or copy the backup as in [B](#b-windows-will-not-boot-esp-files-are-intact-prefer-this) |
-| Menu is not `0.2.3 (<Arch>)` | ESP still has an old EFI | run Install again |
+| Menu is not `0.2.4 (<Arch>)` | ESP still has an old EFI | run Install again |
 | Keyboard dead in the menu (Fast POST / Fast Boot) | firmware did not start USB xHCI | 0.2.3+ connects USB HC before the menu; reinstall |
 | `firmware missing (status=e)` / `load_fw error=-2` | ESP has no blobs for the built arch | `Build-GpuUnlockFirmware.ps1 -Arch <Arch>` then Install `-FirmwareDir .\assets\firmware\<Arch>` |
 | Menu gone after one successful Windows boot | protect task has not run yet, or was never registered | wait ~1 min after login (`C:\ProgramData\GpuUnlock\protect.log`), or elevated `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
@@ -606,7 +608,7 @@ The upstreams are version 2 only, so this combined work stays GPL-2.0-only. SPDX
   edk2/                    local download, not in git
   LICENSE                  GPL-2.0-only
   NOTICE                   attribution to the three upstream Linux modules
-  VERSION                  0.2.3
+  VERSION                  0.2.4
   README.md                English
   README_zh.md             Chinese
 ```
