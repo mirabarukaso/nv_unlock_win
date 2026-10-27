@@ -1,6 +1,8 @@
 > [!IMPORTANT]
-> 没怎么测试过        
-> 仅在以下平台关闭Secure Boot进行了验证: Titan RTX(Turing, Windows 10) / Hyper-V (Windows 10)       
+> 两次测试都关闭了 Secure Boot。
+>
+> - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
+> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16→FP32 GEMM 从 48.5 升到 86.3 TFLOPS（+78%）。
 >
 
 # GPU Unlock UEFI loader (Windows)
@@ -16,13 +18,6 @@
 | Turing | https://github.com/nlzy/turing-unlock |
 | Ampere | https://github.com/Zagitta/gpu-unlock |
 | Ada | https://github.com/JustAResearcher/gpu-unlock-ada |
-
-**本 UEFI 树已验证的范围**
-
-- Hyper-V 第二代虚拟机，**Secure Boot 关闭**：菜单 → 跳过注入 → 进入 Windows。虚拟机没有 NVIDIA GPU。Inject 会枚举 PCI，打印 `0` 张卡，**不写 MMIO**。
-- 实机 **NVIDIA TITAN RTX**（完整 72 SM TU102）：先跑库存 FP16 GEMM，再做一次 UEFI 强制注入（`I`，`10de:1e02`）。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。进 Windows 后 GEMM 与库存一致（噪声范围内），见 [Benchmark](#benchmark)。TITAN 出厂已是满 SM，不会出现 2080 Ti 那种大约 1.5 倍。
-- 实机 **RTX 3070 Ti**（GA104 `10de:2482`）：先 skip，再做一次 Ampere 注入。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 从 48.5 升到 86.3 TFLOPS，见 [Benchmark](#benchmark)。
-- 2080 Ti 和 Ada 上的 UEFI 注入 **尚未** 在本树验证。
 
 版本：`0.2.6`（菜单标题 `GPU Unlock Loader 0.2.6 (<Arch>)`）。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
 

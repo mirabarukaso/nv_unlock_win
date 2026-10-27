@@ -1,6 +1,8 @@
 > [!IMPORTANT]
-> NOT FULLY TEST!            
-> Only test and verify on Titan RTX(Turing, Windows 10) and Hyper-V (Windows 10) with secure boot disabled      
+> Secure Boot was off for both runs.
+>
+> - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
+> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16→FP32 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
 >
 
 [中文README](README_zh.md)
@@ -16,13 +18,6 @@ Linux module sources this tree ports:
 | Turing | https://github.com/nlzy/turing-unlock |
 | Ampere | https://github.com/Zagitta/gpu-unlock |
 | Ada | https://github.com/JustAResearcher/gpu-unlock-ada |
-
-**What is tested in this UEFI tree**
-
-- Hyper-V Generation 2 VM, **Secure Boot off**: menu → skip inject → Windows. The guest has no NVIDIA GPU. Inject enumerates PCI, prints `0` cards, and **does not write MMIO**.
-- On a host **NVIDIA TITAN RTX** (full 72-SM TU102): stock FP16 GEMM, then one UEFI force-inject (`I` on `10de:1e02`). Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. After Windows, GEMM matched stock within noise — see [Benchmark](#benchmark). TITAN is already factory-full; inject does not add the ~1.5x seen on 2080 Ti.
-- On an **RTX 3070 Ti** (GA104 `10de:2482`): skip, then one Ampere inject. The loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS — see [Benchmark](#benchmark).
-- UEFI inject on a 2080 Ti or on Ada is **not** validated here.
 
 Version: `0.2.6` (menu title `GPU Unlock Loader 0.2.6 (<Arch>)`). License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
