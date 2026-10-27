@@ -2,7 +2,7 @@
 > 两次测试都关闭了 Secure Boot。
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
-> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16→FP32 GEMM 从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16→FP32 GEMM 从 48.5 升到 86.3 TFLOPS（+78%）。
 >
 
 # GPU Unlock UEFI loader (Windows)
@@ -584,7 +584,7 @@ python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
 
 2026-10-27，驱动 617.42，PyTorch 2.14.1+cu132，CUDA 13.2。脚本和尺寸与上面相同。Skip 交接：`PLM=ffffff8f SS0=04301072 SS1=3 RO=00400080`。同一天早一次注入在等 SEC2 halt 时以 `-110` 超时，选择器没变，GEMM 与 skip 一致。
 
-后一次是 SEC2 修正。日志横幅 `version=0.2.4`。`GA102 payload result` 为 `boot=0 cpuctl=0x0 plm=ffffffff`，当时 SS 仍是出厂值，随后 `SS0=88888888`、`SS1=8` 回读成功，FLR 之后仍在，并打印 `GA102 FEAT UNLOCKED`。交接：`PLM=ffffffff SS0=88888888 SS1=8 RO=0`，WPR2 `0:1ffffe00`，GSP halted，SEC2 `badf`（与 skip 的空闲引擎相同）。`unlock 10de:2482 result=0`。Windows 正常启动。脚本的 `%peak` 列仍是 2080 Ti 的 56.9 TFLOPS 基准，比较时看这张卡自己的两次结果。
+后一次是 SEC2 修正。日志横幅 `version=0.2.4`。`GA102 payload result` 为 `boot=0 cpuctl=0x0 plm=ffffffff`，当时 SS 仍是出厂值，随后 `SS0=88888888`、`SS1=8` 回读成功，FLR 之后仍在，并打印 `GA102 FEAT UNLOCKED`。交接：`PLM=ffffffff SS0=88888888 SS1=8 RO=0`，WPR2 `0:1ffffe00`，GSP halted，SEC2 `badf`（与 skip 的空闲引擎相同）。`unlock 10de:2482 result=0`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。脚本的 `%peak` 列仍是 2080 Ti 的 56.9 TFLOPS 基准，比较时看这张卡自己的两次结果。
 
 | M.N.K | skip | 注入后 | 倍数 |
 | ---: | ---: | ---: | ---: |
@@ -605,7 +605,7 @@ Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W
 - 快速 POST 下 USB 键盘可用
 - Windows 里 GEMM 与库存差大约 1%（TITAN 出厂已满速，没有 2080 Ti 那种约 1.5 倍）
 
-**RTX 3070 Ti**（`10de:2482`，GA104）也测过：Ampere firmware，上面说的 SEC2 修正。Loader 打印 `GA102 FEAT UNLOCKED`。8192 的 FP16 GEMM 从 48.5 升到 86.3 TFLOPS。见 [Benchmark](#benchmark)。
+**RTX 3070 Ti**（`10de:2482`，GA104）也测过：Ampere firmware，上面说的 SEC2 修正。Loader 打印 `GA102 FEAT UNLOCKED`。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM 从 48.5 升到 86.3 TFLOPS。见 [Benchmark](#benchmark)。
 
 GeForce 2080 Ti 和 Ada 上的注入 **尚未** 在本树验证。后果自负。Tensor core 满速功耗很高，可能损坏硬件。
 

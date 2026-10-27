@@ -2,7 +2,7 @@
 > Secure Boot was off for both runs.
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
-> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16→FP32 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16→FP32 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
 >
 
 [中文README](README_zh.md)
@@ -584,7 +584,7 @@ Three after-inject medians: 1024 = 44.6 / 44.8 / 45.3; 2048 = 87.4 / 87.3 / 87.4
 
 2026-10-27, driver 617.42, PyTorch 2.14.1+cu132, CUDA 13.2. Same script and sizes. Skip handoff: `PLM=ffffff8f SS0=04301072 SS1=3 RO=00400080`. The earlier inject the same day waited for SEC2 halt, timed out at `-110`, left those selectors unchanged, and GEMM matched skip.
 
-The later inject is the SEC2 fix. Log banner `version=0.2.4`. `GA102 payload result` shows `boot=0 cpuctl=0x0 plm=ffffffff` with stock SS still in place, then `SS0=88888888` and `SS1=8` both read back, FLR kept them, and the log says `GA102 FEAT UNLOCKED`. Handoff: `PLM=ffffffff SS0=88888888 SS1=8 RO=0`, WPR2 `0:1ffffe00`, GSP halted, SEC2 `badf` (same idle engines as skip). `unlock 10de:2482 result=0`. Windows started. The script's `%peak` column is still the 2080 Ti 56.9 TFLOPS reference; compare the two runs on this card.
+The later inject is the SEC2 fix. Log banner `version=0.2.4`. `GA102 payload result` shows `boot=0 cpuctl=0x0 plm=ffffffff` with stock SS still in place, then `SS0=88888888` and `SS1=8` both read back, FLR kept them, and the log says `GA102 FEAT UNLOCKED`. Handoff: `PLM=ffffffff SS0=88888888 SS1=8 RO=0`, WPR2 `0:1ffffe00`, GSP halted, SEC2 `badf` (same idle engines as skip). `unlock 10de:2482 result=0`. Windows started. The display stays black for about a minute during boot. Wait. The script's `%peak` column is still the 2080 Ti 56.9 TFLOPS reference; compare the two runs on this card.
 
 | M.N.K | skip | after inject | ratio |
 | ---: | ---: | ---: | ---: |
@@ -605,7 +605,7 @@ Tested on this host **NVIDIA TITAN RTX** (`10de:1e02`, full 72-SM TU102), loader
 - Keyboard works after Fast POST USB connect
 - Windows GEMM matched stock within ~1% (TITAN is factory-full; no 2080 Ti-style ~1.5x)
 
-Also tested on an **RTX 3070 Ti** (`10de:2482`, GA104), Ampere firmware, the SEC2 fix described above. Loader `GA102 FEAT UNLOCKED`. FP16 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS. See [Benchmark](#benchmark).
+Also tested on an **RTX 3070 Ti** (`10de:2482`, GA104), Ampere firmware, the SEC2 fix described above. Loader `GA102 FEAT UNLOCKED`. The display stays black for about a minute during boot. Wait. FP16 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS. See [Benchmark](#benchmark).
 
 Inject on a GeForce 2080 Ti or on Ada is **not** validated here. Use at your own risk. Full-speed tensor cores draw a lot of power and can damage hardware.
 
