@@ -48,7 +48,7 @@ Install-Edk2PackageLink -Edk2Path $Edk2Path
 
 $EdkToolsBin = Get-EdkToolsBin -Edk2Path $Edk2Path
 if (-not $EdkToolsBin) {
-    throw "BaseTools Bin Win32 is missing GenFw.exe under $Edk2Path\BaseTools\Bin\Win32. Re-clone edk2 with submodules."
+    throw "BaseTools Bin Win32 is missing GenFw.exe under $Edk2Path\BaseTools\Bin\Win32. Build BaseTools once: from an x86 Native Tools prompt run edksetup.bat Rebuild. A missing submodule is a separate failure."
 }
 
 $pythonCmd = $Python.Command

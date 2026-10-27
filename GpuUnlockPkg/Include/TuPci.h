@@ -77,6 +77,13 @@ TuPciReadFeat (
   );
 
 VOID
+TuPciLogHandoff (
+  IN TU_PCI_GPU    *Gpus,
+  IN UINTN         Count,
+  IN CONST CHAR8   *Phase
+  );
+
+VOID
 TuPciConnectInput (
   VOID
   );

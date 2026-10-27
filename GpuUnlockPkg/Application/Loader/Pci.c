@@ -103,6 +103,130 @@ TuPciReadFeat (
     );
 }
 
+#define TU_WPR2_LO      0x001fa824u
+#define TU_WPR2_HI      0x001fa828u
+#define TU_BOOT_STATE   0x001180f8u
+#define TU_GSP_CPUCTL   0x00110100u
+#define TU_SEC_CPUCTL   0x00840100u
+#define TU_SEC_DMACTL   0x0084010cu
+#define TU_SEC_MBOX0    0x00840040u
+#define TU_SEC_MBOX1    0x00840044u
+
+STATIC
+UINT64
+TuPciBarBase (
+  IN EFI_PCI_IO_PROTOCOL  *PciIo,
+  IN UINT8                BarIndex
+  )
+{
+  UINT32  Lo;
+  UINT32  Hi;
+  UINT16  Reg;
+
+  Lo  = 0;
+  Hi  = 0;
+  Reg = (UINT16)(0x10u + (UINT16)BarIndex * 4u);
+  PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, Reg, 1, &Lo);
+  if ((Lo & 0x1u) != 0) {
+    return 0;
+  }
+  if ((Lo & 0x6u) == 0x4u) {
+    PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, (UINT32)Reg + 4u, 1, &Hi);
+    return ((UINT64)Hi << 32) | (UINT64)(Lo & 0xfffffff0u);
+  }
+  return (UINT64)(Lo & 0xfffffff0u);
+}
+
+VOID
+TuPciLogHandoff (
+  IN TU_PCI_GPU   *Gpus,
+  IN UINTN        Count,
+  IN CONST CHAR8  *Phase
+  )
+{
+  UINTN    Index;
+  UINT16   Command;
+  UINT32   WprLo;
+  UINT32   WprHi;
+  UINT32   Boot;
+  UINT32   Gsp;
+  UINT32   Sec;
+  UINT32   Dma;
+  UINT32   Mb0;
+  UINT32   Mb1;
+  UINT64   Bar;
+
+  if (Phase == NULL) {
+    Phase = "?";
+  }
+  if (Count == 0 || Gpus == NULL) {
+    GU_NOTE ("handoff phase=%a gpus=0\n", Phase);
+    return;
+  }
+  for (Index = 0; Index < Count; Index++) {
+    Command = 0;
+    WprLo   = 0xffffffffu;
+    WprHi   = 0xffffffffu;
+    Boot    = 0xffffffffu;
+    Gsp     = 0xffffffffu;
+    Sec     = 0xffffffffu;
+    Dma     = 0xffffffffu;
+    Mb0     = 0xffffffffu;
+    Mb1     = 0xffffffffu;
+    Bar     = 0;
+    if (Gpus[Index].PciIo == NULL) {
+      GU_NOTE ("handoff phase=%a index=%u no pciio\n", Phase, (unsigned)Index);
+      continue;
+    }
+    Gpus[Index].PciIo->Pci.Read (
+                             Gpus[Index].PciIo,
+                             EfiPciIoWidthUint16,
+                             0x04,
+                             1,
+                             &Command
+                             );
+    Bar = TuPciBarBase (Gpus[Index].PciIo, Gpus[Index].BarIndex);
+    TuPciReadFeat (&Gpus[Index]);
+    if (!Gpus[Index].FeatValid) {
+      GU_NOTE (
+        "handoff phase=%a 10de:%04x bar=0x%llx cmd=0x%04x feat unread\n",
+        Phase,
+        Gpus[Index].DeviceId,
+        Bar,
+        (UINT32)Command
+        );
+      continue;
+    }
+    WprLo = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_WPR2_LO);
+    WprHi = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_WPR2_HI);
+    Boot  = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_BOOT_STATE);
+    Gsp   = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_GSP_CPUCTL);
+    Sec   = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_SEC_CPUCTL);
+    Dma   = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_SEC_DMACTL);
+    Mb0   = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_SEC_MBOX0);
+    Mb1   = TuPciMemRead32 (Gpus[Index].PciIo, Gpus[Index].BarIndex, TU_SEC_MBOX1);
+    GU_NOTE (
+      "handoff phase=%a 10de:%04x bar=0x%llx cmd=0x%04x plm=0x%08x ss0=0x%08x ss1=0x%08x ro=0x%08x wpr2=0x%08x:0x%08x boot=0x%08x gsp=0x%08x sec=0x%08x dma=0x%08x mb=0x%08x:0x%08x\n",
+      Phase,
+      Gpus[Index].DeviceId,
+      Bar,
+      (UINT32)Command,
+      Gpus[Index].FeatPlm,
+      Gpus[Index].FeatSs0,
+      Gpus[Index].FeatSs1,
+      Gpus[Index].FeatReadout,
+      WprHi,
+      WprLo,
+      Boot,
+      Gsp,
+      Sec,
+      Dma,
+      Mb1,
+      Mb0
+      );
+  }
+}
+
 EFI_STATUS
 TuPciScan (
   OUT TU_PCI_GPU  **Gpus,

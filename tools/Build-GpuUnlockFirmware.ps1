@@ -44,11 +44,20 @@ Write-Host "Cache   : $CacheDir"
 Write-Host "Output  : $OutputDir"
 Write-Host ''
 
-$zstCheck = & $python.Exe -c 'import zstandard' 2>&1
-if ($LASTEXITCODE -ne 0) {
+# PowerShell 5.1 turns a native stderr stream into a terminating error when
+# $ErrorActionPreference is Stop, so a missing module never reached pip.
+$zstPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+& $python.Exe -c 'import zstandard' 2>$null | Out-Null
+$zstOk = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $zstPreference
+if (-not $zstOk) {
     Write-Host 'Installing Python package zstandard (needed to read nvidia-utils .pkg.tar.zst on Windows)...'
+    $ErrorActionPreference = 'Continue'
     & $python.Exe -m pip install --user zstandard
-    if ($LASTEXITCODE -ne 0) {
+    $pipOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = 'Stop'
+    if (-not $pipOk) {
         throw 'pip install zstandard failed. Install zstd.exe or: python -m pip install zstandard'
     }
 }

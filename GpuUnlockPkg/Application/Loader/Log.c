@@ -3,8 +3,68 @@
 #include "TuConfig.h"
 #include "TuFs.h"
 
+#define TU_LOG_MAX  (64u * 1024u)
+
 STATIC EFI_HANDLE  mLogImage;
 STATIC BOOLEAN     mLogVerbose = TRUE;
+STATIC CHAR8       *mLogBuf;
+STATIC UINTN       mLogLen;
+STATIC UINTN       mLogCap;
+
+STATIC
+BOOLEAN
+TuLogReserve (
+  IN UINTN  Need
+  )
+{
+  UINTN  NewCap;
+  CHAR8  *NewBuf;
+
+  if (Need <= mLogCap) {
+    return TRUE;
+  }
+  NewCap = (mLogCap == 0) ? 8192 : mLogCap;
+  while (NewCap < Need) {
+    if (NewCap >= TU_LOG_MAX) {
+      return FALSE;
+    }
+    if (NewCap > (TU_LOG_MAX / 2)) {
+      NewCap = TU_LOG_MAX;
+    } else {
+      NewCap *= 2;
+    }
+  }
+  NewBuf = ReallocatePool (mLogCap, NewCap, mLogBuf);
+  if (NewBuf == NULL) {
+    return FALSE;
+  }
+  mLogBuf = NewBuf;
+  mLogCap = NewCap;
+  return TRUE;
+}
+
+STATIC
+VOID
+TuLogAppend (
+  IN CONST CHAR8  *Text
+  )
+{
+  UINTN  Add;
+
+  if (Text == NULL) {
+    return;
+  }
+  Add = AsciiStrLen (Text);
+  if (Add == 0) {
+    return;
+  }
+  if (!TuLogReserve (mLogLen + Add + 1)) {
+    return;
+  }
+  CopyMem (mLogBuf + mLogLen, Text, Add);
+  mLogLen += Add;
+  mLogBuf[mLogLen] = 0;
+}
 
 STATIC
 VOID
@@ -31,12 +91,10 @@ TuEmitAscii (
     Wide[Out++] = (CHAR16)(UINT8)Text[Index++];
   }
   Wide[Out] = 0;
-  if (mLogVerbose) {
+  if (mLogVerbose && gST != NULL && gST->ConOut != NULL) {
     gST->ConOut->OutputString (gST->ConOut, Wide);
   }
-  if (mLogImage != NULL) {
-    TuFsWriteFile (mLogImage, TU_LOG_NAME, Text, AsciiStrLen (Text), TRUE);
-  }
+  TuLogAppend (Text);
 }
 
 STATIC
@@ -244,7 +302,31 @@ TuLogInit (
 {
   mLogImage   = ImageHandle;
   mLogVerbose = Verbose;
-  TuFsWriteFile (ImageHandle, TU_LOG_NAME, "---- turing-unlock loader ----\r\n", 33, FALSE);
+  mLogLen     = 0;
+  TuLogAppend ("---- turing-unlock loader ----\r\n");
+}
+
+VOID
+TuLogFlush (
+  VOID
+  )
+{
+  EFI_STATUS  Status;
+
+  if (mLogImage == NULL || mLogBuf == NULL || mLogLen == 0) {
+    return;
+  }
+  Status = TuFsWriteFile (mLogImage, TU_LOG_NAME, mLogBuf, mLogLen, FALSE);
+  if (EFI_ERROR (Status)) {
+    if (gST != NULL && gST->ConOut != NULL) {
+      gST->ConOut->OutputString (gST->ConOut, L"unlock.log write failed\r\n");
+    }
+    return;
+  }
+  FreePool (mLogBuf);
+  mLogBuf = NULL;
+  mLogLen = 0;
+  mLogCap = 0;
 }
 
 VOID

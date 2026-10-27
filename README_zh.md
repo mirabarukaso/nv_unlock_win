@@ -39,13 +39,14 @@
 8. [Hyper-V 虚拟机](#hyper-v-虚拟机)
 9. [安装](#安装)
 10. [启动菜单](#启动菜单)
-11. [卸载与恢复](#卸载与恢复)
-12. [WinPE / 安装 U 盘重建 ESP](#winpe--安装-u-盘重建-esp)
-13. [Benchmark](#benchmark)
-14. [实机注入](#实机注入)
-15. [排障](#排障)
-16. [许可证](#许可证)
-17. [布局](#布局)
+11. [启动日志](#启动日志)
+12. [卸载与恢复](#卸载与恢复)
+13. [WinPE / 安装 U 盘重建 ESP](#winpe--安装-u-盘重建-esp)
+14. [Benchmark](#benchmark)
+15. [实机注入](#实机注入)
+16. [排障](#排障)
+17. [许可证](#许可证)
+18. [布局](#布局)
 
 ---
 
@@ -54,7 +55,7 @@
 固件仍然从 `\EFI\Microsoft\Boot\bootmgfw.efi` 启动，不必改 BIOS BootOrder。
 
 1. 安装脚本把原版 `bootmgfw.efi` 备份为 `bootmgfw_ms.efi`，再把本 loader 写到官方路径。
-2. 开机菜单默认 **SKIP inject**（20 秒超时）。倒计时期间 **只读** PLM/SS0/SS1 并显示。`I` 注入（含本架构仅 readout 的 ID，例如 TITAN RTX）。注入后再读一遍寄存器，等 20 秒或按任意键，再进系统。`R` 紧急进入 Windows。
+2. 开机菜单默认 **SKIP inject**（20 秒超时）。倒计时期间 **只读** PLM/SS0/SS1 并显示。`I` 注入（含本架构仅 readout 的 ID，例如 TITAN RTX）。注入后再读一遍寄存器，等 20 秒或按任意键，再进系统。`R` 紧急进入 Windows。chainload 前，跳过和注入都会记一行 `handoff`，并把 `\EFI\turing-unlock\unlock.log` 一次写完。这一行是 Windows 接手时的寄存器：PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0。
 3. 注入只在扫描到当前 **编译架构** 的 NVIDIA 显示设备 **并且** ESP 上有 firmware blob 时才会写 MMIO。
 4. 无论是否注入，loader 都会把 **签名过的原版** 写回 `\EFI\Microsoft\Boot\bootmgfw.efi`（BCD / Code Integrity 认这个文件名），再 `LoadImage` 它。只 chainload 改名后的 `bootmgfw_ms.efi` 会触发 `0xc0000428`。
 5. 计划任务 `GpuUnlock Boot Guard`（SYSTEM）只在 **开机约 1 分钟后跑一次**。Loader 进 Windows 前必须把签名原版 `bootmgfw.efi` 写回去，所以**这一次**开机可以没有菜单、直接进系统。Windows 起来后任务再把包装器贴回。会话中 Windows Update 或其它回滚最多让**下一次**重启少一次菜单，再下一轮就会回来。不需要每小时跑。任务的 `-File` 指向本仓库里的 `tools\Protect-GpuUnlockBoot.ps1`。装完后**不要删这个目录**，否则任务会指向不存在的脚本。
@@ -99,20 +100,26 @@ NASM、EDK2 按下一节下载，不要指望系统自带。
 - `%USERPROFILE%\src\edk2`
 - 环境变量 `EDK2_PATH` 或参数 `-Edk2Path`
 
-需要带 `MdePkg\MdeLibs.dsc.inc` 的树（**edk2-stable202408** 或更新）。必须拉 submodule，否则 BaseTools 不完整。
+使用 **edk2-stable202608** 或更新。DSC 会链接 `CompilerIntrinsicsLib`，并且必须拉 submodule。
+
+- `edk2-stable202408` 没有这个库，`subhook` 仍指向已经不存在的 `github.com/Zeex/subhook`。
+- `edk2-stable202411` 有这个库，subhook 也改到了 `tianocore/edk2-subhook`，但 `CompilerIntrinsicsLib/*_ms.c` 在 x64 上把 `size_t` 定义成 32 位，编译报 `C2371`。
+- `edk2-stable202511` 及之后把 `size_t` 定义成 `unsigned __int64`。这是第一个能用 VS x64 编过本包的 stable 标签。
+
+克隆本身不会生成 `BaseTools\Bin\Win32\GenFw.exe`。编本包之前要先编一次 BaseTools：打开 **x86 Native Tools** 提示符，运行 `edksetup.bat Rebuild`。缺 `GenFw.exe` 是这一步没做，不是缺 submodule。
 
 ```powershell
 git clone --recurse-submodules https://github.com/tianocore/edk2.git edk2
 cd edk2
-git checkout edk2-stable202408
+git checkout edk2-stable202608
 git submodule update --init --recursive
 cd ..
 ```
 
-网络不好可以先浅克隆再补 submodule：
+网络不好可以浅克隆：
 
 ```powershell
-git clone --depth 1 --branch edk2-stable202408 https://github.com/tianocore/edk2.git edk2
+git clone --depth 1 --branch edk2-stable202608 https://github.com/tianocore/edk2.git edk2
 cd edk2
 git submodule update --init --recursive
 cd ..
@@ -372,6 +379,23 @@ Windows 起来后，`GpuUnlock Boot Guard` 会把包装器写回 `bootmgfw.efi`�
 
 ---
 
+## 启动日志
+
+chainload 前，loader 会把 `\EFI\turing-unlock\unlock.log` 一次写完。里面有一行 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）。平时 Windows 不挂载 ESP，把这份日志拷出来需要管理员 PowerShell。在你希望保存日志的那棵目录里跑（编译就在编译树里跑）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Copy-GpuUnlockLog.ps1
+```
+
+脚本在 ESP 没有盘符时挂上它，把 `EFI\turing-unlock\*.log` 拷到本树的 `logs\`，然后卸掉自己分配的盘符。原来就已经挂着的盘符会留着。最新一份同时存成：
+
+- `logs\unlock.log`
+- `logs\unlock-yyyyMMdd-HHmmss.log`（时间取 ESP 上该文件的修改时间）
+
+`logs\` 在 gitignore 里。`-Destination` 可以改输出目录。`-EspRoot` 使用已经挂好的 ESP 根，例如 `S:`。
+
+---
+
 ## 卸载与恢复
 
 ### A. 系统还能进 Windows
@@ -545,6 +569,8 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
 | 进一次 Windows 后菜单消失 | 保护任务还没跑，或根本没注册 | 登录后等约 1 分钟（看 `C:\ProgramData\GpuUnlock\protect.log`），或管理员跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
 | 构建缺 NASM | EDK2 要汇编 `.nasm` | 按上面解压到 `nasm-3.02\nasm.exe` |
 | `LNK2001 memset` | 旧 DSC 没链 CompilerIntrinsicsLib | 本树 DSC 已包含，更新源码再编 |
+| `memset_ms.c` / `memcpy_ms.c` 报 `C2371` `size_t` | EDK2 `edk2-stable202411` 在 x64 上把 `size_t` 定义成 32 位 | 换 `edk2-stable202608`（202408 没有 `CompilerIntrinsicsLib`） |
+| 缺 `GenFw.exe`，报错让你重新克隆 | BaseTools 还没编 | 在 x86 Native Tools 提示符里运行 `edksetup.bat Rebuild` |
 | `error 0004: File read failure` 指向 `Loader.inf` | INF/DSC/DEC 含非 ASCII（EDK2 按系统 ANSI 代码页打开，中文 Windows 常见 cp936） | 当前 INF 已是纯 ASCII；再跑 Prepare（非 ASCII 元数据会直接 fail） |
 | 编译成功但仍打印 `Cannot find BaseTools Bin Win32` | `toolsetup.bat` 在延迟展开生效前测试了空的 `%EDK_TOOLS_BIN%` | 当前 Build 会在 `edksetup.bat` 之前设置 `EDK_TOOLS_BIN`；用现在的 tools 再编一次 |
 
@@ -568,7 +594,8 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
     Arch/Ampere/           GA102 注入（-Arch Ampere）
     Arch/Ada/              AD102 注入（-Arch Ada）
     Include/               公共头文件
-  tools/                   Prepare / 编 EFI / 编 firmware / Clear / Install / Uninstall / Protect
+  tools/                   Prepare / 编 EFI / 编 firmware / Clear / Install / Uninstall / Protect / 拷日志
+  logs/                    从 ESP 拷出的 unlock.log（gitignore）
   firmware/                分架构 blob 生成器（turing、ampere、ada）
   assets/config.ini
   assets/firmware/<Arch>/  生成的 blob（gitignore）

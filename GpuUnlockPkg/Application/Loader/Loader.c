@@ -64,6 +64,13 @@ UefiMain (
     GU_NOTE ("inject skipped by menu action=%u\n", (unsigned)Action);
   }
 
+  TuPciLogHandoff (
+    Gpus,
+    GpuCount,
+    (Action == TuActionInject) ? "inject" :
+    (Action == TuActionEmergency) ? "emergency" : "skip"
+    );
+  TuLogFlush ();
   TuPciFreeScan (Gpus);
 
   if (Config.NoChainload) {

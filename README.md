@@ -39,13 +39,14 @@ Version: `0.2.3` (menu title `GPU Unlock Loader 0.2.3 (<Arch>)`). License: GPL-2
 8. [Hyper-V guest](#hyper-v-guest)
 9. [Install](#install)
 10. [Boot menu](#boot-menu)
-11. [Uninstall and recovery](#uninstall-and-recovery)
-12. [Rebuild the ESP from Windows setup / USB](#rebuild-the-esp-from-windows-setup--usb)
-13. [Benchmark](#benchmark)
-14. [Inject on real hardware](#inject-on-real-hardware)
-15. [Troubleshooting](#troubleshooting)
-16. [License](#license)
-17. [Layout](#layout)
+11. [Loader log](#loader-log)
+12. [Uninstall and recovery](#uninstall-and-recovery)
+13. [Rebuild the ESP from Windows setup / USB](#rebuild-the-esp-from-windows-setup--usb)
+14. [Benchmark](#benchmark)
+15. [Inject on real hardware](#inject-on-real-hardware)
+16. [Troubleshooting](#troubleshooting)
+17. [License](#license)
+18. [Layout](#layout)
 
 ---
 
@@ -54,7 +55,7 @@ Version: `0.2.3` (menu title `GPU Unlock Loader 0.2.3 (<Arch>)`). License: GPL-2
 Firmware still boots `\EFI\Microsoft\Boot\bootmgfw.efi`. BIOS BootOrder does not change.
 
 1. The install script backs up the original `bootmgfw.efi` as `bootmgfw_ms.efi`, then writes this loader to the official path.
-2. The boot menu defaults to **SKIP inject** (20 second timeout). During the countdown it **reads** PLM/SS0/SS1 (no writes) and prints them. `I` injects (including readout-only IDs of the **built** arch, such as TITAN RTX). After inject it re-reads the feat regs, waits 20 seconds or any key, then boots. `R` chain-loads Windows immediately.
+2. The boot menu defaults to **SKIP inject** (20 second timeout). During the countdown it **reads** PLM/SS0/SS1 (no writes) and prints them. `I` injects (including readout-only IDs of the **built** arch, such as TITAN RTX). After inject it re-reads the feat regs, waits 20 seconds or any key, then boots. `R` chain-loads Windows immediately. Before chainload, skip and inject both record one `handoff` line and write `\EFI\turing-unlock\unlock.log` in a single file update. That line is the register state Windows inherits: PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, and BAR0.
 3. Inject writes MMIO only when a NVIDIA device of the **built** arch is present **and** the firmware blobs exist on the ESP.
 4. After skip or inject, the loader copies the **signed original** back onto `\EFI\Microsoft\Boot\bootmgfw.efi` (the BCD / Code Integrity path) and `LoadImage`s that file. Chain-loading a renamed `bootmgfw_ms.efi` while the official name is still the unsigned wrapper yields `0xc0000428`.
 5. Scheduled task `GpuUnlock Boot Guard` (SYSTEM) runs **once, 1 minute after startup**. The loader always puts the signed Microsoft `bootmgfw.efi` back before Windows starts, so **this** boot can go straight into Windows with no menu. The task pastes the wrapper back once Windows is up. Windows Update or another rollback during a session costs at most **one** reboot without the menu; the following boot shows it again. Hourly repetition is unnecessary for that. The task's action is `-File` on `tools\Protect-GpuUnlockBoot.ps1` **inside this repo**. Keep that tree on disk after install; deleting it leaves the task pointing at a missing script.
@@ -99,12 +100,18 @@ The build script looks for `edksetup.bat` in:
 - `%USERPROFILE%\src\edk2`
 - environment variable `EDK2_PATH` or `-Edk2Path`
 
-The tree needs `MdePkg\MdeLibs.dsc.inc` (**edk2-stable202408** or later). Submodules are required or BaseTools is incomplete.
+Use **edk2-stable202608** or later. The DSC links `CompilerIntrinsicsLib`, and submodules are required.
+
+- `edk2-stable202408` does not contain that library. Its `subhook` submodule still points at `github.com/Zeex/subhook`, which is gone.
+- `edk2-stable202411` has the library and `tianocore/edk2-subhook`, but `CompilerIntrinsicsLib/*_ms.c` typedefs `size_t` as 32-bit on x64 and fails with `C2371`.
+- `edk2-stable202511` and later typedef `size_t` as `unsigned __int64`. That is the first stable tag that builds this package with VS x64.
+
+`BaseTools\Bin\Win32\GenFw.exe` is not created by the clone. Build BaseTools once before this package: from an **x86 Native Tools** prompt, `edksetup.bat Rebuild`. A missing `GenFw.exe` means that step has not been run.
 
 ```powershell
 git clone --recurse-submodules https://github.com/tianocore/edk2.git edk2
 cd edk2
-git checkout edk2-stable202408
+git checkout edk2-stable202608
 git submodule update --init --recursive
 cd ..
 ```
@@ -112,7 +119,7 @@ cd ..
 Shallow clone if the network is slow:
 
 ```powershell
-git clone --depth 1 --branch edk2-stable202408 https://github.com/tianocore/edk2.git edk2
+git clone --depth 1 --branch edk2-stable202608 https://github.com/tianocore/edk2.git edk2
 cd edk2
 git submodule update --init --recursive
 cd ..
@@ -372,6 +379,23 @@ After Windows is up, `GpuUnlock Boot Guard` writes the wrapper back to `bootmgfw
 
 ---
 
+## Loader log
+
+Before chainload the loader writes `\EFI\turing-unlock\unlock.log` once. That file includes the `handoff` line (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0). The ESP is not mounted for a normal Windows session. Copying it off requires an elevated PowerShell. Run this from the tree you want the copy in (the compile tree, if that is where you build):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Copy-GpuUnlockLog.ps1
+```
+
+The script mounts the ESP when it has no drive letter, copies `EFI\turing-unlock\*.log` into this tree's `logs\`, then removes a drive letter it assigned itself. A letter that was already mounted is left alone. The newest log is saved as both of these:
+
+- `logs\unlock.log`
+- `logs\unlock-yyyyMMdd-HHmmss.log` (timestamp from the file on the ESP)
+
+`logs\` is gitignored. `-Destination` overrides the output directory. `-EspRoot` uses an ESP root you already mounted, such as `S:`.
+
+---
+
 ## Uninstall and recovery
 
 ### A. Windows still boots
@@ -546,6 +570,8 @@ Firmware binaries remain under the NVIDIA license. See `firmware/<arch>/NOTICE.m
 | Prepare `[fail] NASM` / `[fail] EDK2` | toolchain or clone missing | `Prepare-GpuUnlock.ps1 -FetchNasm` and/or `-FetchEdk2` |
 | Build fails on NASM | EDK2 assembles `.nasm` | extract to `nasm-3.02\nasm.exe` or `-FetchNasm` |
 | `LNK2001 memset` | old DSC did not link CompilerIntrinsicsLib | this tree's DSC already includes it; rebuild from current sources |
+| `C2371` `size_t` in `memset_ms.c` / `memcpy_ms.c` | EDK2 `edk2-stable202411` typedefs `size_t` as 32-bit on x64 | use `edk2-stable202608` (202408 has no `CompilerIntrinsicsLib`) |
+| missing `GenFw.exe`, message says re-clone | BaseTools has not been built | from an x86 Native Tools prompt: `edksetup.bat Rebuild` |
 | `error 0004: File read failure` on `Loader.inf` | INF/DSC/DEC contained non-ASCII (EDK2 opens them with the Windows ANSI code page, often cp936) | current INF files are ASCII only; rerun Prepare (it now fails on non-ASCII meta files) |
 | `Cannot find BaseTools Bin Win32` during a successful build | `toolsetup.bat` tested `%EDK_TOOLS_BIN%` before delayed expansion applied | current Build script sets `EDK_TOOLS_BIN` before `edksetup.bat`; rebuild from current tools |
 
@@ -569,7 +595,8 @@ The upstreams are version 2 only, so this combined work stays GPL-2.0-only. SPDX
     Arch/Ampere/           GA102 inject (build with -Arch Ampere)
     Arch/Ada/              AD102 inject (build with -Arch Ada)
     Include/               shared headers
-  tools/                   Prepare / Build EFI / Build firmware / Clear / Install / Uninstall / Protect
+  tools/                   Prepare / Build EFI / Build firmware / Clear / Install / Uninstall / Protect / Copy log
+  logs/                    ESP unlock.log copies (gitignored)
   firmware/                per-arch blob generators (turing, ampere, ada)
   assets/config.ini
   assets/firmware/<Arch>/  generated blobs (gitignored)

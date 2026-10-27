@@ -6,7 +6,10 @@ $script:Pkg = Join-Path $script:RepoUefi 'GpuUnlockPkg'
 $script:NasmDownload = 'https://www.nasm.us/pub/nasm/releasebuilds/3.02/win64/nasm-3.02-win64.zip'
 $script:NasmHome = 'https://www.nasm.us/'
 $script:Edk2Repo = 'https://github.com/tianocore/edk2.git'
-$script:Edk2Tag = 'edk2-stable202408'
+# 202408 has no CompilerIntrinsicsLib and a dead Zeex/subhook URL.
+# 202411 has the library, but *_ms.c typedefs size_t as 32-bit on x64 (C2371).
+# 202511+ uses unsigned __int64. Pin the stable tag this tree builds with.
+$script:Edk2Tag = 'edk2-stable202608'
 $script:LoaderInfRel = 'GpuUnlockPkg\Application\Loader\Loader.inf'
 $script:ArchNames = @('Turing', 'Ampere', 'Ada')
 # EDK2 INF BASE_NAME and the ESP copy under EFI\turing-unlock\.
@@ -51,6 +54,7 @@ $script:ExpectedFiles = @(
     'tools\Install-GpuUnlockBoot.ps1',
     'tools\Protect-GpuUnlockBoot.ps1',
     'tools\Uninstall-GpuUnlockBoot.ps1',
+    'tools\Copy-GpuUnlockLog.ps1',
     'tools\Common.ps1',
     'assets\config.ini',
     'firmware\README.md',
@@ -787,7 +791,7 @@ function Test-Edk2Tree {
     if ($win32) {
         Write-ToolLine 'ok' 'BaseTools Bin Win32' $win32
     } else {
-        Write-ToolLine 'fail' 'BaseTools Bin Win32' 'missing GenFw.exe; re-clone edk2 with submodules'
+        Write-ToolLine 'fail' 'BaseTools Bin Win32' 'missing GenFw.exe; build BaseTools once (edksetup.bat Rebuild from an x86 Native Tools prompt)'
         $failed = $true
     }
     if ($failed) {

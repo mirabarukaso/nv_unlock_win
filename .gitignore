@@ -9,6 +9,9 @@
 /assets/firmware/**/NVIDIA-LICENSE
 /.cache/
 
+# Loader logs copied off the ESP by tools\Copy-GpuUnlockLog.ps1
+/logs/
+
 # Build products
 /build/
 *.efi

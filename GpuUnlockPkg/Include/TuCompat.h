@@ -84,6 +84,11 @@ TuLogInit (
   );
 
 VOID
+TuLogFlush (
+  VOID
+  );
+
+VOID
 TuLog (
   IN CONST CHAR8  *Prefix,
   IN CONST CHAR8  *Fmt,
