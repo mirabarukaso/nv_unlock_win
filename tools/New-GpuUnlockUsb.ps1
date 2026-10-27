@@ -23,7 +23,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 Assert-Administrator
 
-$Arch = @($Arch | Select-Object -Unique)
+$ArchNames = @{ turing = 'Turing'; ampere = 'Ampere'; ada = 'Ada' }
+$Arch = @($Arch | ForEach-Object { $ArchNames[$_.ToLowerInvariant()] } | Select-Object -Unique)
+if ($BootArch) {
+    $BootArch = $ArchNames[$BootArch.ToLowerInvariant()]
+}
 if (-not $BootArch) {
     if ($Arch.Count -eq 1) {
         $BootArch = $Arch[0]
@@ -129,23 +133,27 @@ function ConvertTo-DriveLetter([string]$Text) {
 }
 
 function Get-UsbRows {
-    $rows = New-Object System.Collections.Generic.List[object]
+    # A generic List[object] cannot be returned from a function on Windows
+    # PowerShell 5.1: "@($list)" throws "Argument types do not match".
+    $rows = @()
     $disks = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' -and -not $_.IsBoot -and -not $_.IsSystem })
     foreach ($disk in $disks) {
         $parts = @(Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue | Where-Object {
-            -not $_.IsBoot -and -not $_.IsSystem -and $_.DriveLetter -ne 'C'
+            $letter = [string]$_.DriveLetter
+            -not $_.IsBoot -and -not $_.IsSystem -and $letter -ne 'C'
         })
         if ($parts.Count -eq 0) {
-            $rows.Add([pscustomobject]@{
+            $rows += [pscustomobject]@{
                 Disk = $disk; Partition = $null; Letter = ''; FileSystem = ''; Label = ''; Size = [int64]$disk.Size; Free = [int64]0
-            })
+            }
             continue
         }
         foreach ($part in $parts) {
             $vol = $null
             try { $vol = Get-Volume -Partition $part } catch { }
             $letter = ''
-            if ($part.DriveLetter) { $letter = [string]$part.DriveLetter }
+            $asText = [string]$part.DriveLetter
+            if ($asText -and $asText -ne "`0") { $letter = $asText }
             $fs = ''
             $label = ''
             $size = [int64]$part.Size
@@ -156,9 +164,9 @@ function Get-UsbRows {
                 if ($vol.Size) { $size = [int64]$vol.Size }
                 if ($vol.SizeRemaining) { $free = [int64]$vol.SizeRemaining }
             }
-            $rows.Add([pscustomobject]@{
+            $rows += [pscustomobject]@{
                 Disk = $disk; Partition = $part; Letter = $letter; FileSystem = $fs; Label = $label; Size = $size; Free = $free
-            })
+            }
         }
     }
     return @($rows)
@@ -303,7 +311,7 @@ if (Test-Path -LiteralPath $oldLoaders) {
     if ($null -ne $oldSum) { $replaced += [int64]$oldSum }
 }
 $free = [int64]$volume.SizeRemaining + $replaced
-Write-Host ("Copy onto {0}: FAT32 label={1} free {2:N0} MB, payload {3:N0} MB." -f $root, $volume.FileSystemLabel, ($free / 1MB), ($need / 1MB))
+Write-Host ("Copy onto {0}  FAT32 label={1} free {2:N0} MB, payload {3:N0} MB." -f $root, $volume.FileSystemLabel, ($free / 1MB), ($need / 1MB))
 Write-Host ("Other letters on this disk stay: {0}" -f (Get-DiskVolumeSummary $rows $chosen.Disk.Number))
 if ($free -lt $need) {
     throw "$root has $([math]::Round($free / 1MB)) MB available and the payload needs $([math]::Round($need / 1MB)) MB."
