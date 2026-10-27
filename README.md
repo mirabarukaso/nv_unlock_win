@@ -21,11 +21,18 @@ Linux module sources this tree ports:
 
 - Hyper-V Generation 2 VM, **Secure Boot off**: menu → skip inject → Windows. The guest has no NVIDIA GPU. Inject enumerates PCI, prints `0` cards, and **does not write MMIO**.
 - On a host **NVIDIA TITAN RTX** (full 72-SM TU102): stock FP16 GEMM, then one UEFI force-inject (`I` on `10de:1e02`). Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. After Windows, GEMM matched stock within noise — see [Benchmark](#benchmark). TITAN is already factory-full; inject does not add the ~1.5x seen on 2080 Ti.
-- UEFI inject on any other real card (2080 Ti, Ampere, Ada) is **not** validated here.
+- On an **RTX 3070 Ti** (GA104 `10de:2482`): skip, then one Ampere inject. The loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS — see [Benchmark](#benchmark).
+- UEFI inject on a 2080 Ti or on Ada is **not** validated here.
 
-Version: `0.2.4` (menu title `GPU Unlock Loader 0.2.4 (<Arch>)`). License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Version: `0.2.6` (menu title `GPU Unlock Loader 0.2.6 (<Arch>)`). License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 `0.2.4` answers the build notes in [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1): the EDK2 pin is `edk2-stable202608`, `assets\config.ini` is in the tree, and the loader writes a `handoff` line to `unlock.log` before Windows. A 2080 Ti retest is still required. This TITAN RTX cannot show whether the SS write takes effect, or whether the driver accepts that state only because the device ID is `10de:1e02`.
+
+`0.2.5` adds a USB boot path that leaves the internal ESP alone, and corrects the Ampere SEC2 completion check. `tools\New-GpuUnlockUsb.ps1` formats a USB disk and copies one or more arch loaders plus their firmware. Before chainload the loader logs `boot mode=esp` when that volume holds a signed `bootmgfw` backup (the existing `Install-GpuUnlockBoot.ps1` layout), `boot mode=usb` when `\EFI\turing-unlock\usb-boot` is present, and `boot mode=unmarked` otherwise. USB mode connects mass-storage controllers and loads Windows Boot Manager from another FAT volume, using that volume's device path. Turing can still be installed on the ESP.
+
+`0.2.6` keeps that ESP path: a signed `bootmgfw` backup on the loader volume still restores that file and starts Windows from that volume only. USB mode (the `usb-boot` marker, and no signed backup) connects NVMe and SATA controllers, then lists EFI loaders on other FAT volumes and waits for a number. The list can contain Windows Boot Manager, a distro `shimx64.efi` or `grubx64.efi`, and `systemd-bootx64.efi`. `\EFI\BOOT\bootx64.efi` is included only when that volume has none of those. Inject, skip, and emergency all reach this list; inject still prints the feature registers and waits first. The selected file is started with that volume's own device path. The scan does not write `bootmgfw.efi`. `New-GpuUnlockUsb.ps1` copies onto a FAT32 volume and does not format any disk. Format the stick in File Explorer first. Pass `-DriveLetter H`, or omit it and pick a letter from the list the script prints. One stick with several letters is one choice per letter.
+
+Ampere now follows the Linux GA10x transaction: SEC2 success is feature PLM opening to `0xffffffff`, not a later halt. On loader 0.2.4 a GA104 RTX 3070 Ti (`10de:2482`) opened PLM with CPUCTL still `0`. The extra 5-second halt poll returned `-110`, SS0/SS1 stayed at stock, and the error-path FLR let Windows start with an unchanged GEMM. Ada still waits for halt, then checks the four AD102 permission words. WPR_CFG `0x1fa7cc` must be `0xfffff0ff`, and WPR `0x1fa7c4` plus feature PLM must be `0xffffffff`, before the selectors are written. FBPA `0x9a0148` is logged only. The same four words are sampled before firmware and again after FLR. The V67 DMA copy is compared with the file immediately before SEC2 starts. A failed GPU is logged as `unlock 10de:<id> result=<errno>`, and `inject finished status=` is no longer `0` when that happens. Chainload still continues. The 3070 Ti retest below used that transaction. Its log banner still says `version=0.2.4` (the EFI was built before the 0.2.5 version string); the payload line is the fixed one, with no halt timeout.
 
 ---
 
@@ -58,7 +65,7 @@ Firmware still boots `\EFI\Microsoft\Boot\bootmgfw.efi`. BIOS BootOrder does not
 
 1. The install script backs up the original `bootmgfw.efi` as `bootmgfw_ms.efi`, then writes this loader to the official path.
 2. The boot menu defaults to **SKIP inject** (20 second timeout). During the countdown it **reads** PLM/SS0/SS1 (no writes) and prints them. `I` injects (including readout-only IDs of the **built** arch, such as TITAN RTX). After inject it re-reads the feat regs, waits 20 seconds or any key, then boots. `R` chain-loads Windows immediately. Before chainload, skip and inject both record one `handoff` line and write `\EFI\turing-unlock\unlock.log` in a single file update. That line is the register state Windows inherits: PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, and BAR0.
-3. Inject writes MMIO only when a NVIDIA device of the **built** arch is present **and** the firmware blobs exist on the ESP.
+3. Inject writes MMIO only when a NVIDIA device of the **built** arch is present **and** the firmware blobs exist on the volume that started the loader (the ESP, or the USB stick).
 4. After skip or inject, the loader copies the **signed original** back onto `\EFI\Microsoft\Boot\bootmgfw.efi` (the BCD / Code Integrity path) and `LoadImage`s that file. Chain-loading a renamed `bootmgfw_ms.efi` while the official name is still the unsigned wrapper yields `0xc0000428`.
 5. Scheduled task `GpuUnlock Boot Guard` (SYSTEM) runs **once, 1 minute after startup**. The loader always puts the signed Microsoft `bootmgfw.efi` back before Windows starts, so **this** boot can go straight into Windows with no menu. The task pastes the wrapper back once Windows is up. Windows Update or another rollback during a session costs at most **one** reboot without the menu; the following boot shows it again. Hourly repetition is unnecessary for that. The task's action is `-File` on `tools\Protect-GpuUnlockBoot.ps1` **inside this repo**. Keep that tree on disk after install; deleting it leaves the task pointing at a missing script.
 
@@ -230,7 +237,7 @@ Optional arguments:
 
 Warnings about `iasl`, CLANG, and Cygwin are safe to ignore for this application. The old `Cannot find BaseTools Bin Win32` line was a false error from `toolsetup.bat` delayed expansion; the build script now sets `EDK_TOOLS_BIN` first.
 
-A second build is incremental and takes a few seconds. The version string in the menu must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.4`) and the arch you built.
+A second build is incremental and takes a few seconds. The version string in the menu must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.6`) and the arch you built.
 
 EFI shell smoke test without replacing bootmgr:
 
@@ -246,7 +253,7 @@ TuringUnlockLoader.efi noload
 
 ## Firmware blobs
 
-NVIDIA firmware is **not** in git. Hyper-V skip-inject does not need it. Real-hardware inject reads `\EFI\turing-unlock\firmware\` on the ESP; missing files fail **before** MMIO (`firmware missing` / `load_fw error=-2`).
+NVIDIA firmware is **not** in git. Hyper-V skip-inject does not need it. Real-hardware inject reads `\EFI\turing-unlock\firmware\` on the volume that started the loader, the internal ESP or the USB stick. Missing files fail **before** MMIO (`firmware missing` / `load_fw error=-2`).
 
 Each arch has its own pinned **610.43.03** set. Turing blobs do not unlock Ampere or Ada. TITAN RTX is TU102: generate **Turing** only.
 
@@ -303,7 +310,7 @@ Install / skip / enter-Windows was tested in this setup. Real-GPU inject was not
    - Clear **Enable Secure Boot**
 3. Copy `build\UnlockLoader-Turing.efi` and the whole `tools\` folder into the guest (shared disk, ISO, or `Copy-VMFile`).
 4. In the guest, run the install command from the next section in an **elevated** PowerShell.
-5. Reboot. The menu should say `GPU Unlock Loader 0.2.4 (Turing)`. Press Enter or wait out the timeout; Windows should start.
+5. Reboot. The menu should say `GPU Unlock Loader 0.2.6 (Turing)`. Press Enter or wait out the timeout; Windows should start.
 
 With no NVIDIA GPU passed through, Inject is still safe: `gpu_count=0`, no MMIO.
 
@@ -345,36 +352,92 @@ Useful parameters:
 | `-SkipScheduledTask` | do not register the protect task |
 | `-FirmwareDir <dir>` | copy that arch's blobs onto the ESP `firmware\` directory (needed only for real-hardware inject) |
 
-**Re-run install after every rebuild**, or the ESP still has the old wrapper. The menu title must match the arch you built, for example `0.2.4 (Turing)`.
+**Re-run install after every rebuild**, or the ESP still has the old wrapper. The menu title must match the arch you built, for example `0.2.6 (Turing)`.
+
+### ESP or USB
+
+Turing belongs on the internal ESP. `Install-GpuUnlockBoot.ps1` replaces `\EFI\Microsoft\Boot\bootmgfw.efi` there. Before Windows starts, the loader writes the signed `bootmgfw.efi` back on that same volume. A startup task puts the wrapper back after Windows is up. There is no boot-target list. Turing's firmware set fits a stock ESP, which is often about 100 MB, next to the existing Windows boot files.
+
+Ampere and Ada belong on a USB stick. Both need `gsp_ga10x.bin`, about 80 MB. A stock ESP of about 100 MB does not have room for that file beside `bootmgfw.efi` and the other Windows boot files. `New-GpuUnlockUsb.ps1` only copies onto a FAT32 stick. It does not mount or change the internal ESP. Firmware boot menu selects the stick. After the loader menu, USB mode lists EFI loaders on the internal NVMe and SATA disks (Windows Boot Manager, GRUB, systemd-boot) and starts the one you pick. Secure Boot stays off.
+
+Ampere and Ada can use the same ESP install as Turing after that volume is large enough for the 80 MB blob and the files already on it. Enlarging the ESP is your own step, with a partition tool you already use, such as MiniTool Partition Wizard. This README does not describe those tools. When the ESP has the free space, run `Install-GpuUnlockBoot.ps1` with `-FirmwareDir .\assets\firmware\Ampere` or `Ada`.
+
+### USB stick
+
+The stick is the Ampere and Ada path, and a Turing path when you want to leave the internal ESP alone. `Install-GpuUnlockBoot.ps1` is unchanged and remains the ESP install.
+
+Format the stick yourself before running the script. In File Explorer, right-click that USB drive, choose Format, and select FAT32. Explorer does not offer FAT32 for a volume larger than 32 GB. In that case, create a 32 GB or smaller volume in Disk Management, then format that volume as FAT32 in Explorer. This script never formats a disk.
+
+Elevated PowerShell, after the loaders and firmware blobs are built. Name the FAT32 letter:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\New-GpuUnlockUsb.ps1 -DriveLetter H -Arch Ampere
+```
+
+Omit `-DriveLetter` and the script prints every FAT32 USB letter. A device with more than one letter is one line per letter. Type the number of the volume to write. A letter that is not FAT32 is refused, with the Explorer steps above.
+
+The script refuses a volume that is not on a USB disk, and the boot or system disk. The chosen letter must already be FAT32 and have enough free space.
+
+| Parameter | Meaning |
+| --- | --- |
+| `-DriveLetter H` | which USB letter to write. `H` and `H:` are the same. Omit this to pick from the list |
+| `-Arch Turing,Ampere,Ada` | which loaders and firmware to copy (default: all three) |
+| `-BootArch Ampere` | which loader is `EFI\BOOT\BOOTX64.EFI`. Required when `-Arch` lists more than one |
+| `-LoaderDir` | directory of `UnlockLoader-<Arch>.efi` (default `build\`) |
+| `-FirmwareRoot` | directory that contains `Turing\`, `Ampere\`, `Ada\` (default `assets\firmware\`) |
+| `-TimeoutSec 20` | menu timeout written into `config.ini` |
+| `-DefaultAction skip` | `skip` or `inject` |
+
+The stick gets `EFI\BOOT\BOOTX64.EFI`, `EFI\turing-unlock\UnlockLoader-<Arch>.efi`, that arch's firmware, `config.ini`, and the marker file `EFI\turing-unlock\usb-boot`. Files already on the reused partition stay, except `EFI\BOOT\BOOTX64.EFI`, `UnlockLoader-*.efi`, and `EFI\turing-unlock\firmware\`, which this script replaces. If both Ampere and Ada are selected, their `gsp_ga10x.bin` hashes must match or the script stops before it writes the disk. Secure Boot must be off. Pick the stick from the firmware boot menu.
+
+The loader decides the mode from files on its own volume. A signed `bootmgfw` backup means `boot mode=esp`: restore the wrapper on that volume only, and do not scan other disks. The `usb-boot` marker means `boot mode=usb`: leave every `bootmgfw.efi` untouched, connect NVMe and SATA controllers, and show the EFI loader list. Both present: the backup wins, so do not copy `bootmgfw_ms.efi` onto the stick. Neither file: `boot mode=unmarked` tries this volume, then the same list. The mode is on screen and in `unlock.log` before the list. On a USB boot the log stays on the stick; `Copy-GpuUnlockLog.ps1` only reads the internal ESP.
+
+A listed file has to be an x64 UEFI application and must not contain this loader's magic. One Windows volume contributes `\EFI\Microsoft\Boot\bootmgfw.efi`. Each other `\EFI\<name>\` directory contributes `shimx64.efi`, or `grubx64.efi` when shim is absent, and `systemd-bootx64.efi` when that file is present. `\EFI\BOOT\bootx64.efi` is listed only when that volume contributed nothing else. The line includes the NVMe, SATA, ATAPI, or SCSI node from the device path. Volumes whose device path is USB are skipped. The number has no timeout. One entry still waits for Enter. Esc returns to firmware. The chosen loader is started with that FAT volume's device path, so GRUB reads `grub.cfg` and its modules from the same partition. A `bootmgfw.efi` that is still this loader is not listed, and USB mode does not restore it; boot the ESP install to run that restore. A BIOS GRUB `core.img` is not on the FAT partition, so it is not listed. An EFI stub `vmlinuz` is not listed either. The distro's EFI loader is what starts Linux.
 
 ---
 
 ## Boot menu
 
 ```
-GPU Unlock Loader 0.2.4 (Turing)
+GPU Unlock Loader 0.2.6 (Turing)
 NVIDIA display GPUs: 1  (feat read-only until I)
   0000:65:00.0  10de:1e02  Turing  (I forces)
     PLM=fffffff8  SS0=00000000  SS1=00000007  RO=00000000
 
   [Enter]  Continue WITHOUT inject   (default)
   [I]      Inject (force same-arch IDs) then show regs
-  [R]      Emergency chainload Windows now
+  [R]      Chainload now, skip the inject screen
 
 Default in 20 sec: SKIP inject
 ```
 
-`I` injects whitelist IDs and also readout-only IDs of the **built** arch (TITAN RTX `10de:1e02` on a Turing build). After inject the loader prints `Feat AFTER inject` and waits 20 seconds or any key before Windows. Needs the TU102 firmware blobs on the ESP or inject errors out before MMIO writes.
+`I` injects whitelist IDs and also readout-only IDs of the **built** arch (TITAN RTX `10de:1e02` on a Turing build). After inject the loader prints `Feat AFTER inject` and waits 20 seconds or any key. On an ESP install it then restores and starts Windows. On a USB boot it then shows the loader list. Needs the TU102 firmware blobs on the loader volume or inject errors out before MMIO writes.
 
-`0.2.3` connects PCI USB host controllers (xHCI/EHCI/UHCI/OHCI) and `ConsoleInHandle` before the menu so a USB keyboard works when firmware Fast POST skipped USB hand-off. It does not recursively connect every PCI device (that can rebind NVIDIA GOP). Default SKIP still boots Windows after 20 seconds with no key.
+`0.2.3` connects PCI USB host controllers (xHCI/EHCI/UHCI/OHCI) and `ConsoleInHandle` before the menu so a USB keyboard works when firmware Fast POST skipped USB hand-off. It does not recursively connect every PCI device (that can rebind NVIDIA GOP). Default SKIP still leaves the menu after 20 seconds with no key.
 
-A healthy skip-then-boot log looks like:
+On USB, skip and emergency go straight to the loader list. Inject goes there after the feature screen. The list itself waits for a number:
 
 ```
-Inject skipped. Continuing to Windows.
+Boot targets on NVMe and SATA:
+
+  [1]  Windows Boot Manager
+       \EFI\Microsoft\Boot\bootmgfw.efi
+       NVMe ns=1 part=1
+  [2]  ubuntu
+       \EFI\ubuntu\shimx64.efi
+       SATA port=0 part=1
+
+Type a number and press Enter.
+Esc returns to firmware.
+```
+
+A healthy ESP skip-then-boot screen looks like:
+
+```
+Inject skipped. Continuing to boot.
 restoring signed bootmgfw.efi from \EFI\Microsoft\Boot\bootmgfw_ms.efi (...)
 restore ok: \EFI\Microsoft\Boot\bootmgfw.efi (...)
-Starting Windows Boot Manager...
+Starting EFI loader...
 ```
 
 After Windows is up, `GpuUnlock Boot Guard` writes the wrapper back to `bootmgfw.efi` (about 1 minute after startup). The boot that just chain-loaded Windows used the restored Microsoft file, so it has no menu; the **next** reboot shows the menu. If Windows Update puts official `bootmgfw.efi` back during a session, the next reboot may skip the menu once; the startup task then pastes the wrapper for the reboot after that.
@@ -383,7 +446,7 @@ After Windows is up, `GpuUnlock Boot Guard` writes the wrapper back to `bootmgfw
 
 ## Loader log
 
-Before chainload the loader writes `\EFI\turing-unlock\unlock.log` once. That file includes the `handoff` line (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0). The ESP is not mounted for a normal Windows session. Copying it off requires an elevated PowerShell. Run this from the tree you want the copy in (the compile tree, if that is where you build):
+Before chainload the loader writes `\EFI\turing-unlock\unlock.log` on the volume it was started from. That file includes the `handoff` line (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0), `boot mode=esp|usb|unmarked`, and after inject one `unlock 10de:<id> result=<errno>` line per GPU. `inject finished status=0` means every attempted GPU returned 0. A failure leaves `status=8000000000000007` (`EFI_DEVICE_ERROR`) and the errno on the per-GPU line. Chainload still runs: on an ESP install that is Windows Boot Manager, and on USB it is the target list. A USB choice is logged as `boot choice <n> <title> <path>` before the selected loader starts. The internal ESP is not mounted for a normal Windows session. Copying its log off requires an elevated PowerShell. Run this from the tree you want the copy in (the compile tree, if that is where you build):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Copy-GpuUnlockLog.ps1
@@ -492,7 +555,7 @@ Script: [`bench/gemm_fp16.py`](bench/gemm_fp16.py). PyTorch → cuBLAS, FP16 inp
 
 **Read this first**
 
-- The only real GPU used with this tree is a host **TITAN RTX** (full 72-SM TU102). Stock GEMM, then one UEFI inject, then GEMM again.
+- Real GPUs measured with this tree: a host **TITAN RTX** (full 72-SM TU102) and an **RTX 3070 Ti** (GA104 `10de:2482`). Each comparison is stock or skip, then one UEFI inject, then GEMM again.
 - The UEFI wrapper boot path is tested in a VM with no NVIDIA GPU. VM GEMM numbers are not comparable to this table.
 - TITAN RTX is a full 72-SM TU102; 2080 Ti is 68 SM. Inject writes GOP-era SS to full (`SS0=88888888`, `SS1=8`) but does not add the ~1.5x GEMM seen on 2080 Ti.
 
@@ -522,6 +585,21 @@ Three after-inject medians: 1024 = 44.6 / 44.8 / 45.3; 2048 = 87.4 / 87.3 / 87.4
 
 1024 is launch-overhead bound on this path (median ~0.048 ms). 2048 is close to unlocked 2080 Ti. 4096 and 8192 exceed unlocked 2080 Ti, stock and after inject alike.
 
+### RTX 3070 Ti
+
+2026-10-27, driver 617.42, PyTorch 2.14.1+cu132, CUDA 13.2. Same script and sizes. Skip handoff: `PLM=ffffff8f SS0=04301072 SS1=3 RO=00400080`. The earlier inject the same day waited for SEC2 halt, timed out at `-110`, left those selectors unchanged, and GEMM matched skip.
+
+The later inject is the SEC2 fix. Log banner `version=0.2.4`. `GA102 payload result` shows `boot=0 cpuctl=0x0 plm=ffffffff` with stock SS still in place, then `SS0=88888888` and `SS1=8` both read back, FLR kept them, and the log says `GA102 FEAT UNLOCKED`. Handoff: `PLM=ffffffff SS0=88888888 SS1=8 RO=0`, WPR2 `0:1ffffe00`, GSP halted, SEC2 `badf` (same idle engines as skip). `unlock 10de:2482 result=0`. Windows started. The script's `%peak` column is still the 2080 Ti 56.9 TFLOPS reference; compare the two runs on this card.
+
+| M.N.K | skip | after inject | ratio |
+| ---: | ---: | ---: | ---: |
+| 1024 | 36.7 | 61.7 | 1.68x |
+| 2048 | 42.5 | 75.2 | 1.77x |
+| 4096 | 46.9 | 85.2 | 1.82x |
+| 8192 | 48.5 | 86.3 | 1.78x |
+
+Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Memory clock 9251 MHz on both. The higher TFLOPS is at a lower SM clock.
+
 ---
 
 ## Inject on real hardware
@@ -532,7 +610,9 @@ Tested on this host **NVIDIA TITAN RTX** (`10de:1e02`, full 72-SM TU102), loader
 - Keyboard works after Fast POST USB connect
 - Windows GEMM matched stock within ~1% (TITAN is factory-full; no 2080 Ti-style ~1.5x)
 
-Inject on a card that needs unlocking (GeForce 2080 Ti, Ampere, Ada) is **not** validated here. Use at your own risk. Full-speed tensor cores draw a lot of power and can damage hardware.
+Also tested on an **RTX 3070 Ti** (`10de:2482`, GA104), Ampere firmware, the SEC2 fix described above. Loader `GA102 FEAT UNLOCKED`. FP16 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS. See [Benchmark](#benchmark).
+
+Inject on a GeForce 2080 Ti or on Ada is **not** validated here. Use at your own risk. Full-speed tensor cores draw a lot of power and can damage hardware.
 
 Each architecture needs its **own** blob set. How to fetch and generate them is in [Firmware blobs](#firmware-blobs). TITAN RTX is TU102; Turing is enough. Without those files the inject path errors out **before** FLR/MMIO. A VM has no card, so they are optional there.
 
@@ -565,9 +645,9 @@ Firmware binaries remain under the NVIDIA license. See `firmware/<arch>/NOTICE.m
 | Firmware boots Windows with no menu | this boot used the restored Microsoft `bootmgfw.efi`, or Secure Boot is on, or the wrapper is gone | expected once after a loader/WU restore; next reboot should show the menu. If it still skips: turn SB off, run `Protect-GpuUnlockBoot.ps1 -RegisterTask`, or reinstall |
 | `LoadImage failed F` / `Access Denied (0x800000000000000F)` | old loader used a memory buffer with a NULL path | use 0.1.1+, reinstall |
 | Recovery `0xc0000428` | CI hashed unsigned wrapper at `bootmgfw.efi` | use 0.1.2+ (restore then chainload), or copy the backup as in [B](#b-windows-will-not-boot-esp-files-are-intact-prefer-this) |
-| Menu is not `0.2.4 (<Arch>)` | ESP still has an old EFI | run Install again |
+| Menu is not `0.2.6 (<Arch>)` | the booted volume still has an old EFI | ESP install: run Install again. USB: rewrite the stick |
 | Keyboard dead in the menu (Fast POST / Fast Boot) | firmware did not start USB xHCI | 0.2.3+ connects USB HC before the menu; reinstall |
-| `firmware missing (status=e)` / `load_fw error=-2` | ESP has no blobs for the built arch | `Build-GpuUnlockFirmware.ps1 -Arch <Arch>` then Install `-FirmwareDir .\assets\firmware\<Arch>` |
+| `firmware missing (status=e)` / `load_fw error=-2` | the volume that started the loader has no blobs for the built arch | build the firmware, then ESP: Install `-FirmwareDir .\assets\firmware\<Arch>`. USB: run `New-GpuUnlockUsb.ps1` again |
 | Menu gone after one successful Windows boot | protect task has not run yet, or was never registered | wait ~1 min after login (`C:\ProgramData\GpuUnlock\protect.log`), or elevated `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
 | Prepare `[fail] NASM` / `[fail] EDK2` | toolchain or clone missing | `Prepare-GpuUnlock.ps1 -FetchNasm` and/or `-FetchEdk2` |
 | Build fails on NASM | EDK2 assembles `.nasm` | extract to `nasm-3.02\nasm.exe` or `-FetchNasm` |
@@ -597,7 +677,7 @@ The upstreams are version 2 only, so this combined work stays GPL-2.0-only. SPDX
     Arch/Ampere/           GA102 inject (build with -Arch Ampere)
     Arch/Ada/              AD102 inject (build with -Arch Ada)
     Include/               shared headers
-  tools/                   Prepare / Build EFI / Build firmware / Clear / Install / Uninstall / Protect / Copy log
+  tools/                   Prepare / Build EFI / Build firmware / Clear / Install / USB stick / Uninstall / Protect / Copy log
   logs/                    ESP unlock.log copies (gitignored)
   firmware/                per-arch blob generators (turing, ampere, ada)
   assets/config.ini
@@ -608,7 +688,7 @@ The upstreams are version 2 only, so this combined work stays GPL-2.0-only. SPDX
   edk2/                    local download, not in git
   LICENSE                  GPL-2.0-only
   NOTICE                   attribution to the three upstream Linux modules
-  VERSION                  0.2.4
+  VERSION                  0.2.6
   README.md                English
   README_zh.md             Chinese
 ```

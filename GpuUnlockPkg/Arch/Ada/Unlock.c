@@ -78,6 +78,10 @@ struct tu_work {
   BOOLEAN                            Quiesced;
   BOOLEAN                            Published;
   BOOLEAN                            PayloadVerified;
+  BOOLEAN                            PermissionSaved;
+  BOOLEAN                            PermissionSampled;
+  u32                                PermissionBefore[4];
+  u32                                PermissionAfter[4];
   struct firmware                    BooterFw;
   struct firmware                    V67Fw;
   struct firmware                    GspFw;
@@ -441,6 +445,15 @@ falcon_hs (
   ret = falcon_reset (w, eng);
   if (ret) {
     return GU_DIAG (ret);
+  }
+  /* SEC2 consumes the V67 DMA copy. A changed buffer is not the pinned payload. */
+  if (WaitPlm &&
+      (w->V67Dma.Cpu == NULL || w->V67Fw.data == NULL ||
+       w->V67Fw.size != GU_V67_SIZE ||
+       CompareMem (w->V67Dma.Cpu, w->V67Fw.data, GU_V67_SIZE) != 0))
+  {
+    GU_ERROR ("AD102 payload copy changed before SEC2 start\n");
+    return GU_DIAG (-EIO);
   }
   trans = rd (w, eng->fbif + 0x24);
   if (bad (trans)) {
@@ -833,6 +846,112 @@ restore_stock_sig (
   return 0;
 }
 
+STATIC CONST struct {
+  CONST CHAR8  *Name;
+  u32          Offset;
+  u32          Expected;
+  BOOLEAN      Required;
+} mAd102Perm[] = {
+  { "WPR_CFG", 0x001fa7ccu, 0xfffff0ffu, TRUE  },
+  { "FBPA",    0x009a0148u, 0xffffffffu, FALSE },
+  { "WPR",     0x001fa7c4u, 0xffffffffu, TRUE  },
+  { "FEAT",    GU_FEAT_PLM_OFFSET, 0xffffffffu, TRUE },
+};
+
+/* All-ones is a real PLM value. Only a badf prefix, a failed read, or a
+ * PCI/chip identity mismatch makes a sample invalid. Required values are
+ * compared by the caller after the payload halts, not on the first sample.
+ */
+STATIC
+int
+ad102_sample_permissions (
+  struct tu_work *w,
+  CONST CHAR8    *Phase,
+  u32            *Values,
+  BOOLEAN        Before
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      Identity;
+  UINT32      Expect;
+  u32         Chip;
+  BOOLEAN     Accessible;
+  UINTN       Index;
+  int         ret;
+
+  Identity = 0;
+  Expect   = 0x10deu | ((UINT32)w->Gpu->DeviceId << 16);
+  Status   = w->PciIo->Pci.Read (
+                             w->PciIo,
+                             EfiPciIoWidthUint32,
+                             0,
+                             1,
+                             &Identity
+                             );
+  Chip       = rd (w, 0);
+  Accessible = !EFI_ERROR (Status) && Identity == Expect &&
+               Chip != 0 && (Chip & 0xffff0000u) != 0xbadf0000u &&
+               Chip != ~0u && (Before || Chip == w->ChipEntry);
+  if (Before && Accessible) {
+    w->ChipEntry = Chip;
+  }
+  ret = 0;
+  for (Index = 0; Index < ARRAY_SIZE (mAd102Perm); Index++) {
+    UINT32   Got;
+    EFI_STATUS ReadSt;
+    u32      Previous;
+    BOOLEAN  Valid;
+
+    Previous = w->PermissionBefore[Index];
+    Got      = 0;
+    ReadSt   = w->PciIo->Mem.Read (
+                              w->PciIo,
+                              EfiPciIoWidthUint32,
+                              w->BarIndex,
+                              mAd102Perm[Index].Offset,
+                              1,
+                              &Got
+                              );
+    Values[Index] = Got;
+    Valid = !EFI_ERROR (ReadSt) &&
+            (Got & 0xffff0000u) != 0xbadf0000u &&
+            Accessible;
+    GU_NOTE (
+      "AD102 permission %a: %a[%#x]=%#x before=%#x expected=%#x required=%u valid=%u pci=%#x chip=%#x\n",
+      Phase,
+      mAd102Perm[Index].Name,
+      mAd102Perm[Index].Offset,
+      Got,
+      Previous,
+      mAd102Perm[Index].Expected,
+      mAd102Perm[Index].Required,
+      Valid,
+      Identity,
+      Chip
+      );
+    if (!Valid) {
+      ret = -ENODEV;
+    }
+  }
+  return GU_DIAG (ret);
+}
+
+STATIC
+BOOLEAN
+ad102_permissions_match (
+  CONST u32 *Values
+  )
+{
+  UINTN Index;
+
+  for (Index = 0; Index < ARRAY_SIZE (mAd102Perm); Index++) {
+    if (mAd102Perm[Index].Required && Values[Index] != mAd102Perm[Index].Expected) {
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
 STATIC
 int
 ad102_readout (
@@ -929,6 +1048,7 @@ ada_flr (
   EFI_STATUS Status;
   u32        chip, value, lo, hi, ss0, ss1, plm, cpuctl;
   UINTN      i;
+  int        perm;
 
   ss0 = rd (w, GU_FEAT_SS0_OFFSET);
   ss1 = rd (w, GU_FEAT_SS1_OFFSET);
@@ -991,7 +1111,14 @@ ada_flr (
     return GU_DIAG (-EBUSY);
   }
   w->Quiesced = TRUE;
-  if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK || plm != ~0u) {
+  if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+    return GU_DIAG (-EIO);
+  }
+  perm = ad102_sample_permissions (w, "post-FLR", w->PermissionAfter, FALSE);
+  if (perm) {
+    return perm;
+  }
+  if (plm != ~0u) {
     return GU_DIAG (-EIO);
   }
   return ad102_readout (w, "post-FLR", TRUE);
@@ -1005,9 +1132,13 @@ sec2_boot (
 {
   const struct gpu_unlock_booter_hdr *h = &w->Hdr;
   u32 marker, cpuctl, ss0, ss1;
-  int ret, halt_ret;
+  int ret, halt_ret, sample_ret;
+  BOOLEAN required;
 
   if (!w->Published || !w->MasterOn || !w->FirmwareStarted) {
+    return GU_DIAG (-EINVAL);
+  }
+  if (!w->PermissionSaved) {
     return GU_DIAG (-EINVAL);
   }
   ret = falcon_hs (
@@ -1025,15 +1156,37 @@ sec2_boot (
   cpuctl   = rd (w, SEC2_BASE + 0x100);
   ss0      = rd (w, GU_FEAT_SS0_OFFSET);
   ss1      = rd (w, GU_FEAT_SS1_OFFSET);
-  w->SecHaltVerified = !bad (cpuctl) && !!(cpuctl & 0x10);
+  w->SecHaltVerified    = !bad (cpuctl) && !!(cpuctl & 0x10);
+  w->PermissionSampled  = TRUE;
+  sample_ret            = ad102_sample_permissions (
+                            w,
+                            "after-payload",
+                            w->PermissionAfter,
+                            FALSE
+                            );
+  required = ad102_permissions_match (w->PermissionAfter);
   GU_NOTE (
-    "AD102 payload result: boot=%d halt=%d marker=%#x expected=%#x cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
-    ret, halt_ret, marker, GU_AD102_MARKER, cpuctl, w->SecHaltVerified, ss0, ss1
+    "AD102 payload result: boot=%d halt=%d marker=%#x expected=%#x required=%u sample=%d cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
+    ret, halt_ret, marker, GU_AD102_MARKER, required, sample_ret,
+    cpuctl, w->SecHaltVerified, ss0, ss1
     );
-  if (ret || halt_ret || marker != GU_AD102_MARKER || !w->SecHaltVerified ||
-      bad (ss0) || bad (ss1) || ad102_readout (w, "after-payload", FALSE))
+  if (ret) {
+    return ret;
+  }
+  if (halt_ret) {
+    return halt_ret;
+  }
+  if (sample_ret) {
+    return sample_ret;
+  }
+  if (marker != GU_AD102_MARKER || !w->SecHaltVerified || !required ||
+      bad (ss0) || bad (ss1))
   {
-    return GU_DIAG (ret ? ret : halt_ret ? halt_ret : -EIO);
+    return GU_DIAG (-EIO);
+  }
+  ret = ad102_readout (w, "after-payload", FALSE);
+  if (ret) {
+    return ret;
   }
   w->PayloadVerified = TRUE;
   return 0;
@@ -1222,6 +1375,11 @@ TuAdaUnlockGpu (
     ret = GU_DIAG (-EBUSY);
     goto out;
   }
+  ret = ad102_sample_permissions (w, "before-firmware", w->PermissionBefore, TRUE);
+  if (ret) {
+    goto out;
+  }
+  w->PermissionSaved = TRUE;
   ret = ad102_readout (w, "before-firmware", FALSE);
   if (ret) {
     goto out;
@@ -1309,6 +1467,10 @@ TuAdaUnlockGpu (
   }
 
 out:
+  if (w->PermissionSaved && !w->PermissionSampled) {
+    (VOID)ad102_sample_permissions (w, "abort", w->PermissionAfter, FALSE);
+    w->PermissionSampled = TRUE;
+  }
   if (ret && w->FirmwareStarted && !w->Quiesced) {
     (VOID)TuPciFlr (w->PciIo);
     if (w->CfgSaved) {

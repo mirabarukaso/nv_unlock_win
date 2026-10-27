@@ -18,10 +18,11 @@ UefiMain (
   )
 {
   EFI_STATUS  Status;
-  TU_CONFIG   Config;
-  TU_PCI_GPU  *Gpus;
-  UINTN       GpuCount;
-  TU_ACTION   Action;
+  TU_CONFIG     Config;
+  TU_PCI_GPU    *Gpus;
+  UINTN         GpuCount;
+  TU_ACTION     Action;
+  TU_BOOT_MODE  BootMode;
   EFI_INPUT_KEY Key;
 
   (VOID)SystemTable;
@@ -60,7 +61,7 @@ UefiMain (
     TuMenuPrintFeat (Gpus, GpuCount);
     TuMenuWaitContinue (TU_POST_INJECT_WAIT_SEC);
   } else {
-    TuPrint (L"Inject skipped. Continuing to Windows.\r\n");
+    TuPrint (L"Inject skipped. Continuing to boot.\r\n");
     GU_NOTE ("inject skipped by menu action=%u\n", (unsigned)Action);
   }
 
@@ -69,6 +70,17 @@ UefiMain (
     GpuCount,
     (Action == TuActionInject) ? "inject" :
     (Action == TuActionEmergency) ? "emergency" : "skip"
+    );
+  BootMode = TuBootModeDetect (ImageHandle);
+  TuPrint (
+    L"Boot mode: %a\r\n",
+    (BootMode == TuBootModeEsp) ? "esp" :
+    (BootMode == TuBootModeUsb) ? "usb" : "unmarked"
+    );
+  GU_NOTE (
+    "boot mode=%a\n",
+    (BootMode == TuBootModeEsp) ? "esp" :
+    (BootMode == TuBootModeUsb) ? "usb" : "unmarked"
     );
   TuLogFlush ();
   TuPciFreeScan (Gpus);
@@ -82,7 +94,7 @@ UefiMain (
     return EFI_SUCCESS;
   }
 
-  Status = TuChainloadWindows (ImageHandle);
+  Status = TuChainloadWindows (ImageHandle, BootMode);
   if (EFI_ERROR (Status)) {
     UINTN Index;
 

@@ -407,6 +407,52 @@ ConnectUsbHostControllers (
   return UsbCount;
 }
 
+UINTN
+TuPciConnectMassStorage (
+  VOID
+  )
+{
+  EFI_STATUS           Status;
+  EFI_HANDLE           *Handles;
+  UINTN                HandleCount;
+  UINTN                Index;
+  UINTN                DiskCount;
+  EFI_PCI_IO_PROTOCOL  *PciIo;
+  UINT32               ClassReg;
+  UINT64               Attr;
+  UINT8                BaseClass;
+
+  DiskCount   = 0;
+  HandleCount = 0;
+  Handles     = NULL;
+  Status      = gBS->LocateHandleBuffer (ByProtocol, &gEfiPciIoProtocolGuid, NULL, &HandleCount, &Handles);
+  if (EFI_ERROR (Status) || Handles == NULL) {
+    return 0;
+  }
+  for (Index = 0; Index < HandleCount; Index++) {
+    Status = gBS->HandleProtocol (Handles[Index], &gEfiPciIoProtocolGuid, (VOID **)&PciIo);
+    if (EFI_ERROR (Status)) {
+      continue;
+    }
+    ClassReg = 0;
+    PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, 0x08, 1, &ClassReg);
+    BaseClass = (UINT8)((ClassReg >> 24) & 0xffu);
+    if (BaseClass != PCI_CLASS_MASS_STORAGE) {
+      continue;
+    }
+    DiskCount++;
+    PciIo->Attributes (
+             PciIo,
+             EfiPciIoAttributeOperationEnable,
+             EFI_PCI_DEVICE_ENABLE,
+             &Attr
+             );
+    gBS->ConnectController (Handles[Index], NULL, NULL, TRUE);
+  }
+  FreePool (Handles);
+  return DiskCount;
+}
+
 VOID
 TuPciConnectInput (
   VOID

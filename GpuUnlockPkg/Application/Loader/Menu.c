@@ -109,7 +109,7 @@ DrawMenu (
   TuPrint (L"\r\n");
   TuPrint (L"  [Enter]  Continue WITHOUT inject   (default)\r\n");
   TuPrint (L"  [I]      Inject (force same-arch IDs) then show regs\r\n");
-  TuPrint (L"  [R]      Emergency chainload Windows now\r\n");
+  TuPrint (L"  [R]      Chainload now, skip the inject screen\r\n");
   TuPrint (L"\r\nDefault in %u sec: SKIP inject\r\n", Remain);
   (VOID)Config;
 }

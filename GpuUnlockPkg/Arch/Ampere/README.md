@@ -20,7 +20,7 @@ Same list as `F:\gpu-unlock\kernel\gpu_unlock\main.c` (GeForce GPU functions onl
 | --- | --- | --- |
 | GA102 | RTX 3090 Ti `10de:2203`, 3090 `2204`, 3080 10GB `2206` | reported unlocked on Linux |
 | GA102 | RTX 3080 Ti 20GB OEM `10de:2205` | unlock completes, BF16 stays half-rate |
-| GA104 | RTX 3070 `10de:2484`, 3070 Ti `2482` | 3070 reported; 3070 Ti from a Windows UEFI port |
+| GA104 | RTX 3070 `10de:2484`, 3070 Ti `2482` | 3070 reported on Linux; 3070 Ti UEFI inject wrote SS and raised FP16 GEMM |
 | GA103 | `10de:2414` | untested |
 | GA106 | RTX 3060 12GB `10de:2504` | validated on that ID |
 
@@ -38,5 +38,11 @@ The UEFI path does not re-unlock after S3; that is a Linux-kmod concern.
 
 Upstream: https://github.com/Zagitta/gpu-unlock
 
-Linux reports unlock on several GA102/GA104/GA106 IDs. This UEFI tree has not
-run Ampere inject on silicon. Compile and VM skip-boot are implemented.
+Linux reports unlock on several GA102/GA104/GA106 IDs. An earlier loader 0.2.4
+inject on a GA104 RTX 3070 Ti (`10de:2482`) opened PLM and then timed out
+waiting for SEC2 to halt, so SS0/SS1 were never written. The fixed transaction
+matches Linux GA10x: PLM open is success, then the selectors are written, then
+FLR. On that card the fixed run logged `GA102 FEAT UNLOCKED` with
+`SS0=88888888` `SS1=8`. The saved log banner is still `version=0.2.4`. FP16
+GEMM at 8192 went from 48.5 TFLOPS (skip, SM 2010 MHz) to 86.3 TFLOPS (inject,
+SM 1815 MHz), driver 617.42. Windows started.

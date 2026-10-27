@@ -21,11 +21,18 @@
 
 - Hyper-V 第二代虚拟机，**Secure Boot 关闭**：菜单 → 跳过注入 → 进入 Windows。虚拟机没有 NVIDIA GPU。Inject 会枚举 PCI，打印 `0` 张卡，**不写 MMIO**。
 - 实机 **NVIDIA TITAN RTX**（完整 72 SM TU102）：先跑库存 FP16 GEMM，再做一次 UEFI 强制注入（`I`，`10de:1e02`）。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。进 Windows 后 GEMM 与库存一致（噪声范围内），见 [Benchmark](#benchmark)。TITAN 出厂已是满 SM，不会出现 2080 Ti 那种大约 1.5 倍。
-- 其它实机（2080 Ti、Ampere、Ada）上的 UEFI 注入 **尚未** 在本树验证。
+- 实机 **RTX 3070 Ti**（GA104 `10de:2482`）：先 skip，再做一次 Ampere 注入。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 从 48.5 升到 86.3 TFLOPS，见 [Benchmark](#benchmark)。
+- 2080 Ti 和 Ada 上的 UEFI 注入 **尚未** 在本树验证。
 
-版本：`0.2.4`（菜单标题 `GPU Unlock Loader 0.2.4 (<Arch>)`）。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+版本：`0.2.6`（菜单标题 `GPU Unlock Loader 0.2.6 (<Arch>)`）。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
 
 `0.2.4` 对应 [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1) 里的构建问题：EDK2 固定到 `edk2-stable202608`，仓库带上 `assets\config.ini`，loader 在进 Windows 前把一行 `handoff` 写入 `unlock.log`。2080 Ti 仍需要复测。这张 TITAN RTX 看不出 SS 写入是否生效，也看不出驱动是不是因为设备 ID `10de:1e02` 才没有拒绝。
+
+`0.2.5` 增加一条不改内部 ESP 的 U 盘启动路径，并修正 Ampere 的 SEC2 完成条件。`tools\New-GpuUnlockUsb.ps1` 会格式化一块 U 盘，拷入一个或多个架构的 loader 和 firmware。chainload 前，loader 在该卷有签名 `bootmgfw` 备份时记 `boot mode=esp`（现有的 `Install-GpuUnlockBoot.ps1` 布局），有 `\EFI\turing-unlock\usb-boot` 时记 `boot mode=usb`，两者都没有则是 `boot mode=unmarked`。USB 模式会连接大容量存储控制器，再从另一块 FAT 卷加载 Windows Boot Manager，设备路径用那块卷自己的。Turing 仍可以装进 ESP。
+
+`0.2.6` 保留这条 ESP 路径：loader 所在卷上有签名 `bootmgfw` 备份时，仍然只在这块卷上还原该文件并启动 Windows。USB 模式（有 `usb-boot` 标记，且没有签名备份）会连接 NVMe 和 SATA 控制器，然后列出其它 FAT 卷上的 EFI 加载器，等用户输入序号。列表里可以有 Windows Boot Manager、发行版的 `shimx64.efi` 或 `grubx64.efi`，以及 `systemd-bootx64.efi`。某一卷上这些都没有时，才列入 `\EFI\BOOT\bootx64.efi`。注入、跳过和紧急启动都会进这张列表；注入仍会先打印特性寄存器并等待。选中的文件用那块卷自己的设备路径启动。这次扫描不写 `bootmgfw.efi`。`New-GpuUnlockUsb.ps1` 只往 FAT32 卷上拷文件，不会格式化任何磁盘。先在资源管理器里把 U 盘格式化成 FAT32。用 `-DriveLetter H` 指定盘符，或者不写这个参数，从脚本列出的盘符里选。一块 U 盘有多个盘符时，每个盘符单独一行。
+
+Ampere 改为遵循 Linux GA10x 事务：SEC2 成功是 feature PLM 变成 `0xffffffff`，不是之后再 halt。loader 0.2.4 在 GA104 RTX 3070 Ti（`10de:2482`）上已经打开 PLM，CPUCTL 仍是 `0`。多等的 5 秒 halt 返回 `-110`，SS0/SS1 停在出厂值，失败路径的 FLR 让 Windows 照常启动，GEMM 没有变化。Ada 仍然等待 halt，然后核对四组 AD102 权限字。写选择器之前，WPR_CFG `0x1fa7cc` 必须是 `0xfffff0ff`，WPR `0x1fa7c4` 和 feature PLM 必须是 `0xffffffff`。FBPA `0x9a0148` 只记录。这四组字在进固件前和 FLR 之后还会再采样。SEC2 启动前会把 V67 的 DMA 副本和文件再比一次。某张卡失败时日志是 `unlock 10de:<id> result=<errno>`，`inject finished status=` 不再是 `0`。chainload 仍会继续。下面的 3070 Ti 复测走的就是这条事务。那份日志横幅仍是 `version=0.2.4`（EFI 在版本字符串改成 0.2.5 之前编的）；payload 那一行已是修正后的格式，没有 halt 超时。
 
 ---
 
@@ -58,7 +65,7 @@
 
 1. 安装脚本把原版 `bootmgfw.efi` 备份为 `bootmgfw_ms.efi`，再把本 loader 写到官方路径。
 2. 开机菜单默认 **SKIP inject**（20 秒超时）。倒计时期间 **只读** PLM/SS0/SS1 并显示。`I` 注入（含本架构仅 readout 的 ID，例如 TITAN RTX）。注入后再读一遍寄存器，等 20 秒或按任意键，再进系统。`R` 紧急进入 Windows。chainload 前，跳过和注入都会记一行 `handoff`，并把 `\EFI\turing-unlock\unlock.log` 一次写完。这一行是 Windows 接手时的寄存器：PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0。
-3. 注入只在扫描到当前 **编译架构** 的 NVIDIA 显示设备 **并且** ESP 上有 firmware blob 时才会写 MMIO。
+3. 注入只在扫描到当前 **编译架构** 的 NVIDIA 显示设备 **并且** 启动 loader 的那块卷上有 firmware blob 时才会写 MMIO（ESP，或 U 盘）。
 4. 无论是否注入，loader 都会把 **签名过的原版** 写回 `\EFI\Microsoft\Boot\bootmgfw.efi`（BCD / Code Integrity 认这个文件名），再 `LoadImage` 它。只 chainload 改名后的 `bootmgfw_ms.efi` 会触发 `0xc0000428`。
 5. 计划任务 `GpuUnlock Boot Guard`（SYSTEM）只在 **开机约 1 分钟后跑一次**。Loader 进 Windows 前必须把签名原版 `bootmgfw.efi` 写回去，所以**这一次**开机可以没有菜单、直接进系统。Windows 起来后任务再把包装器贴回。会话中 Windows Update 或其它回滚最多让**下一次**重启少一次菜单，再下一轮就会回来。不需要每小时跑。任务的 `-File` 指向本仓库里的 `tools\Protect-GpuUnlockBoot.ps1`。装完后**不要删这个目录**，否则任务会指向不存在的脚本。
 
@@ -230,7 +237,7 @@ Ada 用 AD102 系列 Linux 事务（four-PLM V67，成功后 FLR）。Ampere 用
 
 `iasl`、CLANG、Cygwin 的提示可以忽略，本应用用不到。以前那行 `Cannot find BaseTools Bin Win32` 是 `toolsetup.bat` 延迟展开的误报；现在编译脚本会先设置 `EDK_TOOLS_BIN`。
 
-成功后再编一次是增量的，大约几秒。菜单里的版本字符串必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.4`），并且对应当前编译的架构。
+成功后再编一次是增量的，大约几秒。菜单里的版本字符串必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.6`），并且对应当前编译的架构。
 
 用 EFI shell 冒烟、先不替换 bootmgr：
 
@@ -246,7 +253,7 @@ TuringUnlockLoader.efi noload
 
 ## Firmware blob
 
-NVIDIA firmware **不在 git 里**。Hyper-V 跳过注入时不需要。实机注入会读 ESP 上的 `\EFI\turing-unlock\firmware\`，缺文件会在碰 MMIO **之前** 失败（`firmware missing` / `load_fw error=-2`）。
+NVIDIA firmware **不在 git 里**。Hyper-V 跳过注入时不需要。实机注入会读启动 loader 的那块卷上的 `\EFI\turing-unlock\firmware\`，内部 ESP 或 U 盘。缺文件会在碰 MMIO **之前** 失败（`firmware missing` / `load_fw error=-2`）。
 
 每个架构有自己那一套 pinned **610.43.03**。Turing 的 blob 不能解 Ampere / Ada。TITAN RTX 是 TU102，只生成 **Turing**。
 
@@ -303,7 +310,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
    - 取消 **Enable Secure Boot**
 3. 把 `build\UnlockLoader-Turing.efi` 和整个 `tools\` 拷进虚拟机（共享盘、ISO 或 `Copy-VMFile`）。
 4. 虚拟机里用 **管理员** PowerShell 跑下一节的安装命令。
-5. 重启。应看到 `GPU Unlock Loader 0.2.4 (Turing)`。直接回车或等超时，应进入 Windows。
+5. 重启。应看到 `GPU Unlock Loader 0.2.6 (Turing)`。直接回车或等超时，应进入 Windows。
 
 虚拟机没有 NVIDIA 直通时，Inject 也是安全的：`gpu_count=0`，不写 MMIO。
 
@@ -345,36 +352,92 @@ powershell -ExecutionPolicy Bypass -File .\Install-GpuUnlockBoot.ps1 -LoaderEfi 
 | `-SkipScheduledTask` | 不注册保护任务 |
 | `-FirmwareDir <dir>` | 把该架构的 blob 拷到 ESP 的 `firmware\`（实机注入才需要） |
 
-**每次重新编译后都要再跑一次安装**，否则 ESP 上还是旧包装器。菜单标题必须对应当前编译的架构，例如 `0.2.4 (Turing)`。
+**每次重新编译后都要再跑一次安装**，否则 ESP 上还是旧包装器。菜单标题必须对应当前编译的架构，例如 `0.2.6 (Turing)`。
+
+### ESP 还是 U 盘
+
+Turing 优先装进内部 ESP。`Install-GpuUnlockBoot.ps1` 替换那里的 `\EFI\Microsoft\Boot\bootmgfw.efi`。进 Windows 之前，loader 在同一块卷上把签名的 `bootmgfw.efi` 写回去。Windows 起来后，开机任务再把包装器贴回去。这条路径没有启动项列表。Turing 的 firmware 放得进常见的大约 100 MB 的 ESP，旁边仍是原来的 Windows 启动文件。
+
+Ampere 和 Ada 建议用 U 盘。这两套都要一份大约 80 MB 的 `gsp_ga10x.bin`。大约 100 MB 的出厂 ESP 放不下这份文件，再加上 `bootmgfw.efi` 和其余 Windows 启动文件。`New-GpuUnlockUsb.ps1` 只往 FAT32 U 盘上拷文件，不挂载、也不改内部 ESP。从固件启动菜单选这块 U 盘。loader 菜单之后，USB 模式列出内部 NVMe 和 SATA 上的 EFI 加载器（Windows Boot Manager、GRUB、systemd-boot），启动你选的那一个。Secure Boot 保持关闭。
+
+Ampere 和 Ada 也可以走和 Turing 一样的 ESP 安装，前提是这块 ESP 已经大到放得下那 80 MB 的 blob 和卷上原有的文件。把 ESP 加大是你自己做的事，用你手头的分区工具即可，例如 MiniTool Partition Wizard。这里不写这些工具的用法。空间够了之后，用 `Install-GpuUnlockBoot.ps1`，并带上 `-FirmwareDir .\assets\firmware\Ampere` 或 `Ada`。
+
+### U 盘
+
+U 盘是 Ampere 和 Ada 的建议路径，也是不想动内部 ESP 时的 Turing 路径。`Install-GpuUnlockBoot.ps1` 不变，仍然是 ESP 安装。
+
+跑脚本之前，先自己把 U 盘格式化成 FAT32。在资源管理器里右键这块 U 盘，选“格式化”，文件系统选 FAT32。卷大于 32 GB 时，资源管理器不会提供 FAT32。这时先在磁盘管理里划出一个不超过 32 GB 的卷，再回到资源管理器把那个卷格式化成 FAT32。这个脚本不会格式化磁盘。
+
+loader 和 firmware blob 都编好之后，用管理员 PowerShell，写上那个 FAT32 盘符：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\New-GpuUnlockUsb.ps1 -DriveLetter H -Arch Ampere
+```
+
+不写 `-DriveLetter` 时，脚本只列出 FAT32 的 USB 盘符。一个设备有多个盘符就占多行。输入序号，文件拷到那个卷上。不是 FAT32 的盘符会被拒绝，并提示上面的资源管理器步骤。
+
+脚本拒绝不在 USB 上的卷，也拒绝启动盘和系统盘。选中的盘符必须已经是 FAT32，并且剩余空间够用。
+
+| 参数 | 含义 |
+| --- | --- |
+| `-DriveLetter H` | 写入哪个 USB 盘符。`H` 和 `H:` 相同。不写就从列表里选 |
+| `-Arch Turing,Ampere,Ada` | 要拷贝的 loader 和 firmware（默认三个都拷） |
+| `-BootArch Ampere` | 哪一个 loader 写成 `EFI\BOOT\BOOTX64.EFI`。`-Arch` 多于一个时必须指定 |
+| `-LoaderDir` | `UnlockLoader-<Arch>.efi` 所在目录（默认 `build\`） |
+| `-FirmwareRoot` | 下面有 `Turing\`、`Ampere\`、`Ada\` 的目录（默认 `assets\firmware\`） |
+| `-TimeoutSec 20` | 写入 `config.ini` 的菜单秒数 |
+| `-DefaultAction skip` | `skip` 或 `inject` |
+
+U 盘上会有 `EFI\BOOT\BOOTX64.EFI`、`EFI\turing-unlock\UnlockLoader-<Arch>.efi`、该架构的 firmware、`config.ini`，以及标记文件 `EFI\turing-unlock\usb-boot`。复用分区上的其它文件会留下。脚本会替换 `EFI\BOOT\BOOTX64.EFI`、`UnlockLoader-*.efi` 和 `EFI\turing-unlock\firmware\`。Ampere 和 Ada 一起拷时，两份 `gsp_ga10x.bin` 的哈希必须相同，否则脚本在写入之前就停。Secure Boot 必须关闭。从固件启动菜单选这块盘。
+
+loader 只看自己所在卷上的文件。有签名 `bootmgfw` 备份就是 `boot mode=esp`：只在这块卷上还原包装器，不扫描其它磁盘。有 `usb-boot` 标记就是 `boot mode=usb`：不改任何 `bootmgfw.efi`，连接 NVMe 和 SATA，然后显示 EFI 加载器列表。两个都在时备份优先，所以不要把 `bootmgfw_ms.efi` 拷进 U 盘。两个都没有则是 `boot mode=unmarked`：先试本卷，再进同一张列表。模式会打在屏幕上，并在出列表前写入 `unlock.log`。从 U 盘启动时日志留在 U 盘上；`Copy-GpuUnlockLog.ps1` 只读内部 ESP。
+
+列入的文件必须是 x64 UEFI 应用程序，并且不能带这份 loader 的 magic。一块 Windows 卷贡献 `\EFI\Microsoft\Boot\bootmgfw.efi`。其它每个 `\EFI\<名字>\` 目录贡献 `shimx64.efi`，没有 shim 时用 `grubx64.efi`，有 `systemd-bootx64.efi` 时再加一条。`\EFI\BOOT\bootx64.efi` 只在这一卷没有别的加载器时列入。每一行带设备路径里的 NVMe、SATA、ATAPI 或 SCSI 节点。设备路径是 USB 的卷会跳过。序号没有超时。只有一项时仍要按回车。Esc 回到固件。选中的加载器用那块 FAT 卷自己的设备路径启动，所以 GRUB 会从同一分区读 `grub.cfg` 和模块。`bootmgfw.efi` 如果还是这份 loader，不会被列入，USB 模式也不会把它还原；要走那次还原，从 ESP 安装启动。装在 MBR 里的 BIOS GRUB `core.img` 不在 FAT 上，列表里没有。带 EFI stub 的 `vmlinuz` 也不列入。启动 Linux 的是发行版自己的 EFI 加载器。
 
 ---
 
 ## 启动菜单
 
 ```
-GPU Unlock Loader 0.2.4 (Turing)
+GPU Unlock Loader 0.2.6 (Turing)
 NVIDIA display GPUs: 1  (feat read-only until I)
   0000:65:00.0  10de:1e02  Turing  (I forces)
     PLM=fffffff8  SS0=00000000  SS1=00000007  RO=00000000
 
   [Enter]  Continue WITHOUT inject   (default)
   [I]      Inject (force same-arch IDs) then show regs
-  [R]      Emergency chainload Windows now
+  [R]      Chainload now, skip the inject screen
 
 Default in 20 sec: SKIP inject
 ```
 
-`I` 会注入白名单，也会强制注入本架构仅 readout 的卡（Turing 编译下的 TITAN RTX `10de:1e02`）。注入后打印 `Feat AFTER inject`，等 20 秒或按任意键再进 Windows。ESP 上要有 TU102 firmware blob，否则会在写 MMIO 之前失败。
+`I` 会注入白名单，也会强制注入本架构仅 readout 的卡（Turing 编译下的 TITAN RTX `10de:1e02`）。注入后打印 `Feat AFTER inject`，等 20 秒或按任意键。ESP 安装接着还原并启动 Windows。U 盘启动接着显示加载器列表。loader 所在卷上要有 TU102 firmware blob，否则会在写 MMIO 之前失败。
 
-`0.2.3` 在进菜单前会 Connect PCI USB 主机控制器（xHCI/EHCI/UHCI/OHCI）和 `ConsoleInHandle`，这样固件快速 POST 没交接 USB 时键盘也能用。不会递归 Connect 全部 PCI 设备（避免把 NVIDIA GOP 再绑一遍）。默认 SKIP 仍然可以 20 秒不按键进 Windows。
+`0.2.3` 在进菜单前会 Connect PCI USB 主机控制器（xHCI/EHCI/UHCI/OHCI）和 `ConsoleInHandle`，这样固件快速 POST 没交接 USB 时键盘也能用。不会递归 Connect 全部 PCI 设备（避免把 NVIDIA GOP 再绑一遍）。默认 SKIP 仍然是 20 秒不按键就离开这个菜单。
 
-日志里正常的跳过 + 进系统大致是：
+U 盘上，跳过和紧急启动直接进入加载器列表。注入是特性画面结束之后再进。列表本身一直等到输入序号：
 
 ```
-Inject skipped. Continuing to Windows.
+Boot targets on NVMe and SATA:
+
+  [1]  Windows Boot Manager
+       \EFI\Microsoft\Boot\bootmgfw.efi
+       NVMe ns=1 part=1
+  [2]  ubuntu
+       \EFI\ubuntu\shimx64.efi
+       SATA port=0 part=1
+
+Type a number and press Enter.
+Esc returns to firmware.
+```
+
+ESP 上正常的跳过 + 进系统大致是：
+
+```
+Inject skipped. Continuing to boot.
 restoring signed bootmgfw.efi from \EFI\Microsoft\Boot\bootmgfw_ms.efi (...)
 restore ok: \EFI\Microsoft\Boot\bootmgfw.efi (...)
-Starting Windows Boot Manager...
+Starting EFI loader...
 ```
 
 Windows 起来后，`GpuUnlock Boot Guard` 会把包装器写回 `bootmgfw.efi`（大约开机 1 分钟后）。刚 chainload 进 Windows 的那一次用的是还原后的微软文件，所以没有菜单；**下一次**重启才会再出菜单。若 Windows Update 在运行期间把官方 `bootmgfw.efi` 写回去，下一次重启可能少一次菜单；开机任务会在那一轮 Windows 里再贴回包装器，再下一轮重启就有菜单。
@@ -383,7 +446,7 @@ Windows 起来后，`GpuUnlock Boot Guard` 会把包装器写回 `bootmgfw.efi`�
 
 ## 启动日志
 
-chainload 前，loader 会把 `\EFI\turing-unlock\unlock.log` 一次写完。里面有一行 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）。平时 Windows 不挂载 ESP，把这份日志拷出来需要管理员 PowerShell。在你希望保存日志的那棵目录里跑（编译就在编译树里跑）：
+chainload 前，loader 会把 `\EFI\turing-unlock\unlock.log` 写到启动它的那块卷上。里面有一行 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）、`boot mode=esp|usb|unmarked`，以及注入后每张卡一行 `unlock 10de:<id> result=<errno>`。`inject finished status=0` 表示每张尝试过的卡都返回 0。失败时这条是 `status=8000000000000007`（`EFI_DEVICE_ERROR`），具体 errno 在每张卡那一行。chainload 仍会继续：ESP 安装启动的是 Windows Boot Manager，U 盘则是启动项列表。U 盘上选中的一项会在启动前记成 `boot choice <n> <title> <path>`。平时 Windows 不挂载内部 ESP，把那份日志拷出来需要管理员 PowerShell。在你希望保存日志的那棵目录里跑（编译就在编译树里跑）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Copy-GpuUnlockLog.ps1
@@ -492,7 +555,7 @@ Hyper-V：虚拟机设置里挂上官方 Windows ISO，Firmware 启动顺序把 
 
 **说明（请先读）**
 
-- 本树唯一测过的实机 GPU 是宿主机 **TITAN RTX**（完整 72 SM TU102）。先库存 GEMM，再 UEFI 注入，再 GEMM。
+- 本树测过的实机 GPU：宿主机 **TITAN RTX**（完整 72 SM TU102）和 **RTX 3070 Ti**（GA104 `10de:2482`）。每次都是库存或 skip，再 UEFI 注入，再 GEMM。
 - UEFI 包装器的启动路径是在没有 NVIDIA GPU 的虚拟机里测的。虚拟机里的 GEMM 数字不能和这张表比。
 - TITAN RTX 是完整 72 SM 的 TU102，2080 Ti 是 68 SM。注入会把 GOP 时代 SS 写成满速（`SS0=88888888`、`SS1=8`），但 GEMM 不会出现 2080 Ti 那种大约 1.5 倍。
 
@@ -522,6 +585,21 @@ python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
 
 1024 这个尺寸受 kernel launch 开销影响（中位数约 0.048 ms）。2048 接近解锁后的 2080 Ti。4096 和 8192 无论库存还是注入后都超过解锁后的 2080 Ti。
 
+### RTX 3070 Ti
+
+2026-10-27，驱动 617.42，PyTorch 2.14.1+cu132，CUDA 13.2。脚本和尺寸与上面相同。Skip 交接：`PLM=ffffff8f SS0=04301072 SS1=3 RO=00400080`。同一天早一次注入在等 SEC2 halt 时以 `-110` 超时，选择器没变，GEMM 与 skip 一致。
+
+后一次是 SEC2 修正。日志横幅 `version=0.2.4`。`GA102 payload result` 为 `boot=0 cpuctl=0x0 plm=ffffffff`，当时 SS 仍是出厂值，随后 `SS0=88888888`、`SS1=8` 回读成功，FLR 之后仍在，并打印 `GA102 FEAT UNLOCKED`。交接：`PLM=ffffffff SS0=88888888 SS1=8 RO=0`，WPR2 `0:1ffffe00`，GSP halted，SEC2 `badf`（与 skip 的空闲引擎相同）。`unlock 10de:2482 result=0`。Windows 正常启动。脚本的 `%peak` 列仍是 2080 Ti 的 56.9 TFLOPS 基准，比较时看这张卡自己的两次结果。
+
+| M.N.K | skip | 注入后 | 倍数 |
+| ---: | ---: | ---: | ---: |
+| 1024 | 36.7 | 61.7 | 1.68x |
+| 2048 | 42.5 | 75.2 | 1.77x |
+| 4096 | 46.9 | 85.2 | 1.82x |
+| 8192 | 48.5 | 86.3 | 1.78x |
+
+Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W。两边显存时钟都是 9251 MHz。TFLOPS 升高发生在更低的 SM 频率上。
+
 ---
 
 ## 实机注入
@@ -532,7 +610,9 @@ python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
 - 快速 POST 下 USB 键盘可用
 - Windows 里 GEMM 与库存差大约 1%（TITAN 出厂已满速，没有 2080 Ti 那种约 1.5 倍）
 
-真正需要解锁的卡（GeForce 2080 Ti、Ampere、Ada）上的注入 **尚未** 在本树验证。后果自负。Tensor core 满速功耗很高，可能损坏硬件。
+**RTX 3070 Ti**（`10de:2482`，GA104）也测过：Ampere firmware，上面说的 SEC2 修正。Loader 打印 `GA102 FEAT UNLOCKED`。8192 的 FP16 GEMM 从 48.5 升到 86.3 TFLOPS。见 [Benchmark](#benchmark)。
+
+GeForce 2080 Ti 和 Ada 上的注入 **尚未** 在本树验证。后果自负。Tensor core 满速功耗很高，可能损坏硬件。
 
 每个架构要 **自己那一套** blob。如何获取和生成见 [Firmware blob](#firmware-blob)。TITAN RTX 是 TU102，编 Turing 即可。没有这些文件时，注入路径会在碰 FLR/MMIO **之前** 报错。虚拟机没有卡，这些文件可省略。
 
@@ -565,9 +645,9 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
 | 固件直接进 Windows，没有菜单 | 这一次用的是还原后的微软 `bootmgfw.efi`，或 SB 仍开，或包装器没了 | loader/WU 还原后这一轮没有菜单是预期；下次重启应出现。若仍没有：关 SB，跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask`，或重装 |
 | `LoadImage failed F` / `Access Denied (0x800000000000000F)` | 旧 loader 用内存 buffer + NULL 路径加载 | 使用 0.1.1+，重装 |
 | 恢复蓝屏 `0xc0000428` | CI 校验到的 `bootmgfw.efi` 还是未签名包装器 | 使用 0.1.2+（先 restore 再 chainload）；或按 [B](#b-进不了-windows但-esp-文件还在优先用这个) copy 备份 |
-| 菜单不是 `0.2.4 (<Arch>)` | ESP 上还是旧 EFI | 再跑 Install |
+| 菜单不是 `0.2.6 (<Arch>)` | 这次启动的卷上还是旧 EFI | ESP 安装：再跑 Install。U 盘：重写 U 盘 |
 | 菜单里键盘没反应（快速 POST） | 固件没启动 USB xHCI | 0.2.3+ 进菜单前会 Connect USB 主机；重装 |
-| `firmware missing (status=e)` / `load_fw error=-2` | ESP 上没有当前架构的 blob | 跑 `Build-GpuUnlockFirmware.ps1 -Arch <Arch>`，再 Install `-FirmwareDir .\assets\firmware\<Arch>` |
+| `firmware missing (status=e)` / `load_fw error=-2` | 启动 loader 的那块卷上没有当前架构的 blob | 先生成 firmware。ESP：Install `-FirmwareDir .\assets\firmware\<Arch>`。U 盘：再跑一次 `New-GpuUnlockUsb.ps1` |
 | 进一次 Windows 后菜单消失 | 保护任务还没跑，或根本没注册 | 登录后等约 1 分钟（看 `C:\ProgramData\GpuUnlock\protect.log`），或管理员跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
 | 构建缺 NASM | EDK2 要汇编 `.nasm` | 按上面解压到 `nasm-3.02\nasm.exe` |
 | `LNK2001 memset` | 旧 DSC 没链 CompilerIntrinsicsLib | 本树 DSC 已包含，更新源码再编 |
@@ -596,7 +676,7 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
     Arch/Ampere/           GA102 注入（-Arch Ampere）
     Arch/Ada/              AD102 注入（-Arch Ada）
     Include/               公共头文件
-  tools/                   Prepare / 编 EFI / 编 firmware / Clear / Install / Uninstall / Protect / 拷日志
+  tools/                   Prepare / 编 EFI / 编 firmware / Clear / Install / U 盘 / Uninstall / Protect / 拷日志
   logs/                    从 ESP 拷出的 unlock.log（gitignore）
   firmware/                分架构 blob 生成器（turing、ampere、ada）
   assets/config.ini
@@ -607,7 +687,7 @@ Firmware 二进制仍受 NVIDIA 许可约束，见 `firmware/<arch>/NOTICE.md`�
   edk2/                    本地下载，不入库
   LICENSE                  GPL-2.0-only
   NOTICE                   三个上游 Linux 模块的署名
-  VERSION                  0.2.4
+  VERSION                  0.2.6
   README.md                英文
   README_zh.md             中文
 ```

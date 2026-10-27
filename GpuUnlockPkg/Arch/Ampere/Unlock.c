@@ -71,7 +71,6 @@ struct tu_work {
   BOOLEAN                            FirmwareStarted;
   BOOLEAN                            GspStarted;
   BOOLEAN                            SecStarted;
-  BOOLEAN                            SecHaltVerified;
   BOOLEAN                            Quiesced;
   BOOLEAN                            Published;
   BOOLEAN                            PayloadVerified;
@@ -477,8 +476,7 @@ falcon_hs (
   GU_NOTE ("Falcon start: base=%#x cpuctl=%#x code_va=%#x mailbox=%#x:%#x\n",
            eng->base, cpuctl, code_va, mailbox1, mailbox0);
   if (eng->base == SEC2_BASE) {
-    w->SecStarted      = TRUE;
-    w->SecHaltVerified = FALSE;
+    w->SecStarted = TRUE;
   }
   if (eng->base == GSP_BASE) {
     w->GspStarted = TRUE;
@@ -818,7 +816,7 @@ restore_stock_sig (
   struct tu_work *w
   )
 {
-  if (!w->MetaDma.Cpu || !w->StockDma.Cpu || !w->SecHaltVerified) {
+  if (!w->MetaDma.Cpu || !w->StockDma.Cpu) {
     return GU_DIAG (-EBUSY);
   }
   put_le64 ((u8 *)w->MetaDma.Cpu + 72, w->StockDma.Dma);
@@ -972,12 +970,19 @@ sec2_boot (
   )
 {
   const struct gpu_unlock_booter_hdr *h = &w->Hdr;
-  u32 cpuctl, ss0, ss1;
-  int ret, halt_ret;
+  u32 cpuctl, plm, ss0, ss1;
+  int ret;
 
   if (!w->Published || !w->MasterOn || !w->FirmwareStarted) {
     return GU_DIAG (-EINVAL);
   }
+  /*
+   * falcon_hs(WaitPlm) returns when feature PLM opens. Linux stops there
+   * on GA10x: halt before PLM is the failure, and a still-running SEC2 is
+   * the success state. The stock signature and the selectors are written
+   * next. ampere_flr is what stops SEC2. The AD102 halt wait does not
+   * apply here; on GA104 CPUCTL stays clear and that wait times out.
+   */
   ret = falcon_hs (
           w, &mSec2,
           h->app_code_off, h->app_code_size, h->app_code_off, 0,
@@ -988,17 +993,19 @@ sec2_boot (
           upper_32_bits (w->MetaDma.Dma),
           TRUE
           );
-  halt_ret = ret ? ret : poll (w, SEC2_BASE + 0x100, 0x10, 0x10, 5000000, TRUE);
-  cpuctl   = rd (w, SEC2_BASE + 0x100);
-  ss0      = rd (w, GU_FEAT_SS0_OFFSET);
-  ss1      = rd (w, GU_FEAT_SS1_OFFSET);
-  w->SecHaltVerified = !bad (cpuctl) && !!(cpuctl & 0x10);
+  cpuctl = rd (w, SEC2_BASE + 0x100);
+  plm    = rd (w, GU_FEAT_PLM_OFFSET);
+  ss0    = rd (w, GU_FEAT_SS0_OFFSET);
+  ss1    = rd (w, GU_FEAT_SS1_OFFSET);
   GU_NOTE (
-    "GA102 payload result: boot=%d halt=%d cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
-    ret, halt_ret, cpuctl, w->SecHaltVerified, ss0, ss1
+    "GA102 payload result: boot=%d cpuctl=%#x plm=%#x ss0=%#x ss1=%#x\n",
+    ret, cpuctl, plm, ss0, ss1
     );
-  if (ret || halt_ret || !w->SecHaltVerified || bad (ss0) || bad (ss1)) {
-    return GU_DIAG (ret ? ret : halt_ret ? halt_ret : -EIO);
+  if (ret) {
+    return ret;
+  }
+  if (plm != ~0u || bad (ss0) || bad (ss1)) {
+    return GU_DIAG (-EIO);
   }
   w->PayloadVerified = TRUE;
   return 0;

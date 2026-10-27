@@ -88,6 +88,11 @@ TuPciConnectInput (
   VOID
   );
 
+UINTN
+TuPciConnectMassStorage (
+  VOID
+  );
+
 UINT32
 TuPciMemRead32 (
   IN EFI_PCI_IO_PROTOCOL  *PciIo,

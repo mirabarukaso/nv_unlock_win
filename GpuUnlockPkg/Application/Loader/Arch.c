@@ -175,6 +175,7 @@ TuUnlockAll (
 {
   UINTN  Index;
   INTN   Ret;
+  INTN   Failed;
   CHAR8  Name[32];
 
   if (GpuCount == 0) {
@@ -183,6 +184,7 @@ TuUnlockAll (
     return EFI_SUCCESS;
   }
 
+  Failed = 0;
   for (Index = 0; Index < GpuCount; Index++) {
     AsciiSPrint (
       Name,
@@ -243,11 +245,18 @@ TuUnlockAll (
           );
         continue;
     }
+    GU_NOTE ("unlock 10de:%04x result=%d\n", Gpus[Index].DeviceId, (int)Ret);
     if (Ret) {
       TuPrint (L"Unlock failed (%d)\r\n", Ret);
+      if (!Failed) {
+        Failed = Ret;
+      }
     } else {
       TuPrint (L"Unlock completed.\r\n");
     }
+  }
+  if (Failed) {
+    return EFI_DEVICE_ERROR;
   }
   return EFI_SUCCESS;
 }

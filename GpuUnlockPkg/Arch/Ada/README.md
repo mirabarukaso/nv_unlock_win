@@ -32,6 +32,12 @@ The one-board Latence.app AD104 MSI path (`10de:2782`) is not imported.
 - `gsp_boot_desc_ad102.bin`
 
 Ada success **does** FLR so the stock Windows driver starts from a clean halted GSP.
+SEC2 must halt before the stock signature or the selectors are written. The
+four permission words are sampled before firmware, after that halt, and after
+FLR. WPR_CFG `0x1fa7cc` must be `0xfffff0ff`, and WPR `0x1fa7c4` plus feature
+PLM must be `0xffffffff`, before the selectors are written. FBPA `0x9a0148` is
+logged only. The V67 DMA copy is compared with the file immediately before
+SEC2 starts.
 Feature registers are Ampere-style (`0x8238xx`), not Turing `0x40965x`.
 
 Upstream: https://github.com/JustAResearcher/gpu-unlock-ada

@@ -55,6 +55,7 @@ $script:ExpectedFiles = @(
     'tools\Protect-GpuUnlockBoot.ps1',
     'tools\Uninstall-GpuUnlockBoot.ps1',
     'tools\Copy-GpuUnlockLog.ps1',
+    'tools\New-GpuUnlockUsb.ps1',
     'tools\Common.ps1',
     'assets\config.ini',
     'firmware\README.md',

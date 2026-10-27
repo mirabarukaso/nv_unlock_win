@@ -323,10 +323,9 @@ TuLogFlush (
     }
     return;
   }
-  FreePool (mLogBuf);
-  mLogBuf = NULL;
-  mLogLen = 0;
-  mLogCap = 0;
+  /* Keep the buffer. A later flush rewrites the whole file, so a boot
+   * choice recorded after the first flush is still in unlock.log.
+   */
 }
 
 VOID

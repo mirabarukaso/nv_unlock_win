@@ -5,7 +5,7 @@
 #include <Uefi.h>
 
 #define TU_LOADER_MAGIC        "TURING_UNLOCK_LOADER_v1"
-#define TU_LOADER_VERSION      "0.2.4"
+#define TU_LOADER_VERSION      "0.2.6"
 
 #if defined(TU_BUILD_ARCH_TURING)
 # if defined(TU_BUILD_ARCH_AMPERE) || defined(TU_BUILD_ARCH_ADA)
@@ -25,6 +25,7 @@
 #define TU_DIR_NAME            L"\\EFI\\turing-unlock"
 #define TU_CONFIG_NAME         L"\\EFI\\turing-unlock\\config.ini"
 #define TU_LOG_NAME            L"\\EFI\\turing-unlock\\unlock.log"
+#define TU_USB_BOOT_MARK       L"\\EFI\\turing-unlock\\usb-boot"
 #define TU_MS_BOOT_BACKUP      L"\\EFI\\turing-unlock\\bootmgfw_ms.efi"
 #define TU_MS_BOOT_BACKUP_ALT  L"\\EFI\\Microsoft\\Boot\\bootmgfw_ms.efi"
 #define TU_MS_BOOT_OFFICIAL    L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
