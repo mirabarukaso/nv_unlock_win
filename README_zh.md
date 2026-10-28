@@ -3,7 +3,7 @@
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
 > - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
-> - **RTX 4080**（AD103，`10de:2704`），loader **0.2.12** Windows Inject（代测）。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。`mma_bench_sm89` 在 `f16/f32` / `bf16/f32` / `fp8/e4m3` 约 **2×**（对照项基本持平）。需要 `rtx4080_experimental=1` 以及 `targets` 里的 **精确** PCI BDF（不能用 `all`）。解锁仅当前会话有效；Inject 测试之间请关闭 **快速启动**。详情：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
+> - **RTX 4080**（AD103，`10de:2704`）在 Windows 11 + UEFI loader **0.2.12** 上可用，驱动 617.42 — FP16 98.6→160.4 TFLOPS（+63%），BF16 98.4→163.7（+66%）（[#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)）。需要 `rtx4080_experimental=1` 以及 `targets` 里的**精确** PCI BDF（不能用 `all`）。详情：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 > - **RTX 4090**（AD102，`10de:2684`）— **需重新验证**。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。此前发布的 Windows GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 ID `2684` 的配置支持不变。
 
 # GPU Unlock UEFI loader (Windows)
@@ -248,7 +248,7 @@ python .\bench\gemm_bf16.py --sizes 1024,2048,4096,8192 --repeat 80
 
 Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W。两边显存时钟都是 9251 MHz。
 
-**RTX 4080**（`10de:2704`，AD103），代测，loader **0.2.12** Windows Inject。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。`mma_bench_sm89` 在 `f16/f32` / `bf16/f32` / `fp8/e4m3` 约 **2×**（对照项基本持平）。完整库存对比表与操作说明见 [docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md#mma-结果rtx-4080-0212)。本 SKU **不要**只靠 cuBLAS FP16/BF16 GEMM 当解锁证明。
+**RTX 4080**（`10de:2704`，AD103）在 Windows 11 + UEFI loader **0.2.12** 上可用，驱动 617.42 — FP16 98.6→160.4 TFLOPS（+63%），BF16 98.4→163.7（+66%）（[#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)）。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。`mma_bench_sm89` 对比表、配置与操作说明见 [docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md#mma-结果rtx-4080-0212)。
 
 **RTX 4090**（`10de:2684`，AD102）— **需重新验证。** Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`；Windows 正常启动。本 SKU 此前发布的 Windows cuBLAS FP16 GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 Ada 配置（`2684`）不变。
 
