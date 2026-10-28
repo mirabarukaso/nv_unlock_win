@@ -9,7 +9,7 @@
   BASE_NAME                      = TuringUnlockLoader
   FILE_GUID                      = B3C91E44-6D70-4A11-9E2C-77A1B0C4D801
   MODULE_TYPE                    = UEFI_APPLICATION
-  VERSION_STRING                 = 0.2.7
+  VERSION_STRING       = 0.2.12
   ENTRY_POINT                    = UefiMain
 
 [Sources]
@@ -55,6 +55,8 @@
   gEfiLoadedImageProtocolGuid
   gEfiLoadedImageDevicePathProtocolGuid
   gEfiDevicePathProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
+  gEfiSimpleTextOutProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
 
 [Guids]

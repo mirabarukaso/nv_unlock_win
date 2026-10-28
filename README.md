@@ -3,8 +3,11 @@
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
 > - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
-> - **RTX 4090** (AD102, `10de:2684`), Windows 10, driver 595.79. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM (FP32 accumulate) at 8192 rose from 135.9 to 156.3 TFLOPS (+15%). 1024 and 2048 stayed flat.
+> - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Windows 10, driver 595.79. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked **RTX 4080** 0.2.12 MMA already exceeds the old published 4090 figures). Config support for base ID `2684` is unchanged.
 >
+
+> [!NOTE]
+> **Ada / RTX 4080 verified on loader 0.2.12.** Friend-run Windows inject on `10de:2704`: `AD102 FEAT UNLOCKED`, then `mma_bench_sm89` about **2×** on `f16/f32` / `bf16/f32` / `fp8/e4m3` (control modes flat). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Unlock is session-only; turn **Fast Startup** off between inject tests. Per-card Ada flags (including stock **RTX 4090** `2684` and experimental **4090 D** `2685`), registry steps, and full MMA tables: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
 
 [中文README](README_zh.md)
 
@@ -12,7 +15,7 @@
 
 Unsigned EFI loader for Turing, Ampere, and Ada. Boot it from a FAT32 USB stick, optionally unlock the GPU, then start Windows, GRUB, systemd-boot, or another x64 EFI loader on an internal disk. The stick does not modify the internal EFI system partition (ESP), so the firmware boot menu can still start the systems already installed there.
 
-Version `0.2.7`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
+Version `0.2.12`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
 
 Most people stop after [Use](#use): download a release EFI, generate the matching firmware, copy both onto a USB stick. [Build from source](#build-from-source) is only for compiling the EFI yourself.
 
@@ -34,25 +37,26 @@ Linux module sources this tree ports:
 4. [USB stick](#usb-stick)
 5. [Boot menu](#boot-menu)
 6. [Loader log](#loader-log)
-7. [If the machine will not start](#if-the-machine-will-not-start)
-8. [Measured results](#measured-results)
+7. [Ada / RTX 40-series](#ada--rtx-40-series) → details [docs/RTX40_Ada.md](docs/RTX40_Ada.md)
+8. [If the machine will not start](#if-the-machine-will-not-start)
+9. [Measured results](#measured-results)
 
 **Advanced**
 
-9. [ESP install](#esp-install)
+10. [ESP install](#esp-install)
 
 **Build from source**
 
-10. [Prerequisites](#prerequisites)
-11. [Download the toolchain](#download-the-toolchain)
-12. [Prepare and build](#prepare-and-build)
-13. [Clear](#clear)
-14. [Hyper-V guest](#hyper-v-guest)
-15. [Build troubleshooting](#build-troubleshooting)
-16. [Layout](#layout)
+11. [Prerequisites](#prerequisites)
+12. [Download the toolchain](#download-the-toolchain)
+13. [Prepare and build](#prepare-and-build)
+14. [Clear](#clear)
+15. [Hyper-V guest](#hyper-v-guest)
+16. [Build troubleshooting](#build-troubleshooting)
+17. [Layout](#layout)
 
-17. [License](#license)
-18. [Changelog](#changelog)
+18. [License](#license)
+19. [Changelog](#changelog)
 
 ---
 
@@ -126,7 +130,7 @@ In the firmware boot menu, boot the stick. Secure Boot stays off.
 ### Boot menu
 
 ```
-GPU Unlock Loader 0.2.7 (Turing)
+GPU Unlock Loader 0.2.12 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -158,7 +162,7 @@ A listed file is an x64 UEFI application and does not contain this loader's magi
 
 ### Loader log
 
-Before the chosen loader starts, the stick gets `\EFI\turing-unlock\unlock.log`. It includes `handoff` (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0), `boot mode=usb`, and after inject one `unlock 10de:<id> result=<errno>` line per GPU. `inject finished status=0` means every attempted GPU returned 0. A failure leaves `status=8000000000000007` (`EFI_DEVICE_ERROR`). The target list still appears. The choice is logged as `boot choice <n> <title> <path>`.
+Before the chosen loader starts, the stick gets `\EFI\turing-unlock\unlock.log`. PCI scan always logs each GPU as `Found <seg:bus:dev.fn>  10de:<id>  <Arch>` (skip and inject). It also includes `handoff` (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0), `boot mode=usb`, and after inject one `unlock 10de:<id> result=<errno>` line per GPU. `inject finished status=0` means every attempted GPU returned 0. A failure leaves `status=8000000000000007` (`EFI_DEVICE_ERROR`). The target list still appears. The choice is logged as `boot choice <n> <title> <path>`.
 
 The log stays on the stick. Copy the file off after you boot an OS that can read that FAT volume. Register traces stay in that file, and so does each one-shot line the screen shows (the choice, unlock result, and a chainload error). The menu itself is redrawn every second and is not copied into the file. Set `verbose=1` in `config.ini` to mirror the file onto the screen.
 
@@ -167,6 +171,26 @@ If Explorer is showing the internal EFI system partition, elevated PowerShell re
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 ```
+
+### Ada / RTX 40-series
+
+Stock **RTX 4090** (`10de:2684`) is the Ada **base** ID: `UnlockLoader-Ada.efi`, `targets=all` (or a listed BDF), no experimental flag. Inject/boot support stands; **published Windows GEMM numbers are withdrawn** pending re-benchmark (**needs re-verification**).
+
+Other Ada IDs in this tree need a config flag; several also need an **exact** BDF. Summary:
+
+| Card | ID | Flag | `targets` |
+| --- | --- | --- | --- |
+| RTX 4090 | `2684` | *(base)* | `all` or BDF |
+| RTX 4090 D | `2685` | `rtx4090d_experimental=1` | `all` or BDF |
+| RTX 4080 | `2704` | `rtx4080_experimental=1` | **exact BDF** |
+| RTX 4080 SUPER | `2702` | `ad103_experimental=1` | **exact BDF** |
+| AD103 canary | `2705` | `ad103_experimental=1` | **exact BDF** |
+| AD106 | `2805` | `ad106_experimental=1` | **exact BDF** |
+
+- Session-only unlock; Inject again after reboot.
+- Turn **Fast Startup** off between inject tests (UI or `HiberbootEnabled=0`; missing key often means Fast Startup is on). Full registry steps: [docs/RTX40_Ada.md](docs/RTX40_Ada.md#ops-notes-4080--primary-display-gpu).
+- Ada Windows handoff (0.2.12+) credits [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker) (code GPL-2.0-only; new docs CC BY-NC 4.0). Details: [docs/RTX40_Ada.md](docs/RTX40_Ada.md#credits-ada-windows-handoff).
+- Full per-card examples, BDF howto, `skip_flr`, Fast Startup / `HiberbootEnabled`, TOTORONG credit, and 4080 MMA tables: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
 
 ### If the machine will not start
 
@@ -226,16 +250,12 @@ Stock after the run: 309 W, SM 1935 MHz, 49 C. After inject: about 285–290 W, 
 
 Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Memory clock 9251 MHz on both.
 
-**RTX 4090** (`10de:2684`, AD102), 2026-10-28, Windows 10, driver 595.79, PyTorch 2.11.0+cu130, CUDA 13.0, 450 W cap. Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`. Windows started with device error code 0. Three rounds each; the table is the median. 1024 and 2048 did not move. Every 8192 round after inject was above every baseline round.
+**RTX 4090** (`10de:2684`, AD102) — **needs re-verification.** Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`; Windows started. Earlier published Windows cuBLAS FP16 GEMM figures for this SKU are **withdrawn** pending a re-benchmark: unlocked **RTX 4080** 0.2.12 `mma_bench_sm89` already exceeds those old 4090 numbers. Base Ada config for `2684` is unchanged.
 
-| M.N.K | skip | after inject | change |
-| ---: | ---: | ---: | ---: |
-| 1024 | 104.9 | 104.9 | 0% |
-| 2048 | 164.5 | 164.5 | 0% |
-| 4096 | 155.9 | 151.6 | −2.8% |
-| 8192 | 135.9 | 156.3 | +15% |
 
-The Linux Ada reports separate two measurements. Register-resident FP16/FP32 issue rate on a 4090 is about 2× (around 165 to 330 TFLOPS). cuBLAS GEMM on the same cards moves much less, about 12–34% depending on shape, and a sustained Windows run of 8192³ BF16 GEMM was about +5%. The card sits on its power limit, so the GEMM does not reach the issue-rate ratio. This UEFI run matches that GEMM pattern. This card's BF16 GEMM was not measured.
+**RTX 4080** (`10de:2704`): loader **0.2.12** inject verified with `mma_bench_sm89` (~2× on `f16/f32` / `bf16/f32` / `fp8/e4m3`). Full stock vs inject tables and ops notes are in [docs/RTX40_Ada.md](docs/RTX40_Ada.md#mma-results-rtx-4080-0212). Do **not** treat cuBLAS FP16/BF16 GEMM alone as unlock proof on this SKU.
+
+On Ada, register-resident issue-rate probes (such as `mma_bench_sm89`) and large cuBLAS GEMM can disagree a lot: GEMM often sits on the power limit. Prefer the issue-rate probe for unlock proof. Any older published **RTX 4090** Windows GEMM deltas in this tree are withdrawn (**needs re-verification**).
 
 Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
 
@@ -245,7 +265,7 @@ Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw 
 | --- | --- |
 | Stick is not listed, or the menu never appears | Secure Boot is still on, or the firmware boot menu was not set to the stick |
 | `firmware missing` / `load_fw error=-2` | Generate that arch's blobs and run `New-GpuUnlockUsb.ps1` again |
-| Menu is not `0.2.7 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
+| Menu is not `0.2.12 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
 | Keyboard dead in the menu | 0.2.3 and later connect USB before the menu. Rewrite the stick with a current EFI |
 | RTX 3070 Ti stays black after inject | Wait about a minute. The measured boot did this and then reached Windows |
 | No internal disk in the target list | The firmware did not publish a FAT EFI partition on NVMe or SATA, or the only loader there is this unsigned wrapper |
@@ -387,7 +407,7 @@ Build runs Prepare first (`-SkipPrepare` only after that succeeded in the same t
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.7`).
+Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.12`).
 
 Ada uses the AD102 Linux transaction (four-PLM V67, then FLR). Ampere uses the GA102 Linux transaction (V67, selectors, then FLR). Turing writes the selectors and does not FLR.
 
@@ -429,7 +449,7 @@ Install, skip, and entering Windows were tested in a Generation 2 VM with no NVI
 2. Shut it down. Settings → Security → clear **Enable Secure Boot**.
 3. Copy `build\UnlockLoader-Turing.efi` and `tools\` into the guest.
 4. Run the ESP install from an elevated PowerShell in the guest.
-5. Reboot. The menu should say `GPU Unlock Loader 0.2.7 (Turing)`. Enter or the timeout should start Windows.
+5. Reboot. The menu should say `GPU Unlock Loader 0.2.12 (Turing)`. Enter or the timeout should start Windows.
 
 With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
 
@@ -467,7 +487,7 @@ With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
   edk2/                    local download, not in git
   LICENSE                  GPL-2.0-only
   NOTICE                   attribution
-  VERSION                  0.2.7
+  VERSION                  0.2.12
   README.md                English
   README_zh.md             Chinese
 ```
@@ -483,6 +503,18 @@ NVIDIA firmware stays under NVIDIA's license and is not in git.
 ---
 
 ## Changelog
+
+`0.2.12` follows the TOTORONG AD103 Windows unlocker handoff: preload (LoadImage) Windows Boot Manager before disconnect/unlock when possible; keep pre-FLR `driver_release`; after FLR, `ConnectController` reconnects GOP, re-check selectors (`post-GOP-reconnect`), then StartImage the preloaded image (falls back to the previous LoadImage path if preload missed or StartImage fails). Ada/Ampere success paths both reconnect. Unlock payload unchanged.
+
+Docs (same tree): RTX 4080 MMA ~2× issue-rate validation on 0.2.12 inject (`10de:2704`, `skip_flr=0`); Experimental section documents Fast Startup / `HiberbootEnabled` registry, volatile unlock, and `mma_bench_sm89` as the Ada unlock check.
+
+`0.2.11` pre-FLR console/GOP / display-child disconnect (Latence-style `driver_release`) before Ada/Ampere PCIe FLR, plus optional `skip_flr=1` to isolate primary-GPU FLR reboot. Disconnect covers TextOut, GraphicsOutput under the GPU, every PciIo BY_CHILD (gopless display children; upstream AD103 Windows #39 / #92), then the GPU PCI handle. Working #92 Windows 2705 boots blank ~1s at FLR/GOP reconnect — not a power-cycle; Fast Startup should be off. Ada unlock transaction otherwise unchanged from 0.2.10.
+
+`0.2.10` hardens UEFI PCIe FLR / config restore toward Linux `gpu-unlock-ada` (`unlock_610` / `gpu_unlock_command_restore`): after Initiate FLR, selective BAR restore, COMMAND restore with MEMORY on / BME off, BAR + identity checks, and DevSta TRPND clear. Skips a blind 256-byte config blast when identity mismatches. Ada unlock transaction otherwise unchanged.
+
+`0.2.9` PCI scan writes each GPU's BDF into `unlock.log` on skip and inject (`Found <seg:bus:dev.fn>  10de:<id>`). Pre-0.2.9 skip logs only had the device id. README documents RTX 4080 experimental ops: flag + exact `targets` BDF (`targets=all` never admits 4080).
+
+`0.2.8` adds Ada admission for experimental RTX 4080 (`10de:2704`) and RTX 4080 SUPER (`10de:2702`). Both need a config.ini flag (`rtx4080_experimental` / `ad103_experimental`) and their exact PCI BDF in `targets` (never via `targets=all`). Existing experimental Ada IDs (`2685`, `2705`, `2805`) use the same style of gates. Unlock routing uses an explicit `ad102_family()` map onto the pinned AD102 assets; no per-ID fuse/SM/VBIOS tables. Readout-only Ada IDs are no longer force-injected.
 
 `0.2.7` chooses inject, skip, and a USB boot target with the up and down keys. Diagnostic lines go to `unlock.log`. The screen keeps the menu, the result, and errors. `verbose=0` is the default. `tools\Hide-GpuUnlockEsp.ps1` removes a drive letter from the internal EFI system partition.
 

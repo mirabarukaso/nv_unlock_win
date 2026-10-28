@@ -21,4 +21,22 @@ TuChainloadWindows (
   IN TU_BOOT_MODE  Mode
   );
 
+/* TOTORONG AD103 / Latence: LoadImage Windows Boot Manager before disconnect
+ * and unlock. TuChainloadWindows StartImages the preloaded handle when set. */
+EFI_STATUS
+TuChainloadPreload (
+  IN EFI_HANDLE    ImageHandle,
+  IN TU_BOOT_MODE  Mode
+  );
+
+BOOLEAN
+TuChainloadHasPreload (
+  VOID
+  );
+
+VOID
+TuChainloadClearPreload (
+  VOID
+  );
+
 #endif

@@ -76,6 +76,7 @@ struct tu_work {
   BOOLEAN                            SecStarted;
   BOOLEAN                            SecHaltVerified;
   BOOLEAN                            Quiesced;
+  BOOLEAN                            SkipFlr;
   BOOLEAN                            Published;
   BOOLEAN                            PayloadVerified;
   BOOLEAN                            PermissionSaved;
@@ -1066,13 +1067,69 @@ ada_flr (
     TuPciClearMaster (w->PciIo);
     w->MasterOn = FALSE;
   }
-  GU_NOTE ("PCIe FLR begin: chip=%#x\n", chip);
+  {
+    UINT16  Command;
+
+    Status = w->PciIo->Pci.Read (
+                             w->PciIo,
+                             EfiPciIoWidthUint16,
+                             PCI_COMMAND_OFFSET,
+                             1,
+                             &Command
+                             );
+    if (EFI_ERROR (Status) || Command == 0xffff ||
+        (Command & EFI_PCI_COMMAND_BUS_MASTER) != 0)
+    {
+      GU_ERROR ("pre-FLR COMMAND still has BME or unread: %#x\n", Command);
+      return GU_DIAG (-EIO);
+    }
+  }
+  /* Latence-style: detach TextOut / GraphicsConsole / NVIDIA GOP before FLR. */
+  (VOID)TuPciDisconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+
+  if (w->SkipFlr) {
+    GU_NOTE (
+      "skip_flr=1: skipping PCIe FLR after SS/readout success (experimental)\n"
+      );
+    TuLogWide (
+      L"skip_flr=1: PCIe FLR skipped; chainload continues with unlock state.\r\n"
+      );
+    w->Quiesced = TRUE;
+    if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+      return GU_DIAG (-EIO);
+    }
+    if (ad102_readout (w, "skip-FLR", TRUE)) {
+      return GU_DIAG (-EIO);
+    }
+    /* Still reconnect so chainload has a live GOP after driver_release. */
+    (VOID)TuPciReconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+    ss0 = rd (w, GU_FEAT_SS0_OFFSET);
+    ss1 = rd (w, GU_FEAT_SS1_OFFSET);
+    plm = rd (w, GU_FEAT_PLM_OFFSET);
+    GU_NOTE (
+      "post-GOP-reconnect: SS0=%#x SS1=%#x PLM=%#x (skip_flr)\n",
+      ss0, ss1, plm
+      );
+    if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+      return GU_DIAG (-EIO);
+    }
+    return ad102_readout (w, "post-GOP-reconnect", TRUE);
+  }
+
+  GU_NOTE ("PCIe FLR begin: BME=0 chip=%#x\n", chip);
   Status = TuPciFlr (w->PciIo);
+  GU_NOTE ("PCIe FLR returned: 0x%lx\n", (UINTN)Status);
   if (EFI_ERROR (Status)) {
     return GU_DIAG (-EIO);
   }
-  if (w->CfgSaved) {
-    TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+  if (!w->CfgSaved) {
+    GU_ERROR ("post-FLR: no saved PCI config image\n");
+    return GU_DIAG (-EIO);
+  }
+  Status = TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+  if (EFI_ERROR (Status)) {
+    GU_ERROR ("post-FLR config restore failed: 0x%lx\n", (UINTN)Status);
+    return GU_DIAG (-EIO);
   }
   for (i = 0; i < 1000; i++) {
     value = rd (w, 0);
@@ -1121,7 +1178,29 @@ ada_flr (
   if (plm != ~0u) {
     return GU_DIAG (-EIO);
   }
-  return ad102_readout (w, "post-FLR", TRUE);
+  if (ad102_readout (w, "post-FLR", TRUE)) {
+    return GU_DIAG (-EIO);
+  }
+
+  /*
+   * TOTORONG AD103 Windows unlocker: reconnect GOP after FLR, observe
+   * selectors again, then the loader StartImages the preloaded bootmgfw.
+   */
+  (VOID)TuPciReconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+  ss0 = rd (w, GU_FEAT_SS0_OFFSET);
+  ss1 = rd (w, GU_FEAT_SS1_OFFSET);
+  plm = rd (w, GU_FEAT_PLM_OFFSET);
+  GU_NOTE (
+    "post-GOP-reconnect: SS0=%#x SS1=%#x PLM=%#x\n",
+    ss0, ss1, plm
+    );
+  if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+    return GU_DIAG (-EIO);
+  }
+  if (plm != ~0u) {
+    return GU_DIAG (-EIO);
+  }
+  return ad102_readout (w, "post-GOP-reconnect", TRUE);
 }
 
 STATIC
@@ -1262,10 +1341,33 @@ firmware_quiesced (
   return w->Quiesced;
 }
 
+/* Every Ada ID that uses the pinned AD102-family Booter, four-PLM V67, and
+ * transaction checks. Ada.c decides admission; this only routes assets.
+ * Do not invent per-ID fuse/SM/VBIOS tables. */
+STATIC
+BOOLEAN
+ad102_family (
+  IN UINT16  Device
+  )
+{
+  switch (Device) {
+    case GU_AD102_RTX_4090:
+    case GU_AD102_RTX_4090_D:
+    case GU_AD103_RTX_4080_SUPER:
+    case GU_AD103_RTX_4080:
+    case GU_AD103_RTX_4070_TI_SUPER:
+    case GU_AD106_RTX_4060_TI_16GB:
+      return TRUE;
+    default:
+      return FALSE;
+  }
+}
+
 INTN
 TuAdaUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   )
 {
   struct tu_work *w;
@@ -1281,7 +1383,17 @@ TuAdaUnlockGpu (
   w->Gpu         = Gpu;
   w->PciIo       = Gpu->PciIo;
   w->BarIndex    = Gpu->BarIndex;
+  w->SkipFlr     = (Config != NULL && Config->SkipFlr);
+  if (w->SkipFlr) {
+    GU_NOTE ("skip_flr=1 enabled (experimental): FLR will be skipped after selectors\n");
+  }
 
+  if (!ad102_family (Gpu->DeviceId)) {
+    GU_NOTE ("Ada PCI ID %#x is not on the AD102-family asset route\n", Gpu->DeviceId);
+    TuLogWide (L"Unsupported Ada ID 10de:%04x for AD102-family payload.\r\n", Gpu->DeviceId);
+    ret = GU_DIAG (-EOPNOTSUPP);
+    goto out;
+  }
   if (Gpu->DeviceId != GU_AD102_RTX_4090) {
     GU_NOTE ("experimental Ada PCI ID %#x using AD102-family assets\n", Gpu->DeviceId);
     TuLogWide (L"Experimental Ada ID 10de:%04x; AD102-family payload.\r\n", Gpu->DeviceId);
@@ -1472,12 +1584,26 @@ out:
     w->PermissionSampled = TRUE;
   }
   if (ret && w->FirmwareStarted && !w->Quiesced) {
-    (VOID)TuPciFlr (w->PciIo);
-    if (w->CfgSaved) {
-      TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+    EFI_STATUS  FlrSt;
+
+    if (w->SkipFlr) {
+      GU_NOTE ("skip_flr=1: skipping abort FLR\n");
+      w->Quiesced = TRUE;
+      w->MasterOn = FALSE;
+    } else {
+      (VOID)TuPciDisconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+      FlrSt = TuPciFlr (w->PciIo);
+      if (EFI_ERROR (FlrSt)) {
+        GU_ERROR ("abort FLR failed: 0x%lx\n", (UINTN)FlrSt);
+      } else if (w->CfgSaved) {
+        FlrSt = TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+        if (EFI_ERROR (FlrSt)) {
+          GU_ERROR ("abort config restore failed: 0x%lx\n", (UINTN)FlrSt);
+        }
+      }
+      w->Quiesced = TRUE;
+      w->MasterOn = FALSE;
     }
-    w->Quiesced = TRUE;
-    w->MasterOn = FALSE;
   }
   if (!firmware_quiesced (w)) {
     GU_ERROR ("firmware did not stop; leaving DMA until power off\n");

@@ -59,6 +59,10 @@ STATIC CONST TU_LOAD_TRY mLoadTries[] = {
 /* Wrapper is ~70KB; Microsoft bootmgfw is typically >1MB. */
 #define TU_MIN_SIGNED_BOOTMGR  0x20000u
 
+/* TOTORONG AD103 handoff: LoadImage before disconnect; StartImage after reconnect. */
+STATIC EFI_HANDLE  mPreloadedImage  = NULL;
+STATIC EFI_HANDLE  mPreloadedDevice = NULL;
+
 STATIC
 VOID
 PrintStatus (
@@ -426,6 +430,64 @@ StartWindowsImage (
   ExitSize = 0;
   Status   = gBS->StartImage (Image, &ExitSize, &ExitData);
   PrintStatus (L"StartImage returned", Status);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+LoadCandidateOnly (
+  IN EFI_HANDLE                Parent,
+  IN EFI_HANDLE                Device,
+  IN CONST CHAR16              *Path,
+  IN EFI_DEVICE_PATH_PROTOCOL  *SelfPath,
+  IN BOOLEAN                   UseLoaderPrefix,
+  OUT EFI_HANDLE               *OutImage
+  )
+{
+  EFI_STATUS                Status;
+  EFI_HANDLE                Image;
+  EFI_DEVICE_PATH_PROTOCOL  *Dp;
+  UINTN                     Index;
+
+  *OutImage = NULL;
+  if (CandidateIsWrapper (Device, Path)) {
+    return EFI_NOT_FOUND;
+  }
+
+  Dp = BuildLoadPath (Device, Path, SelfPath, UseLoaderPrefix);
+  PrintDp (L"preload path", Dp);
+
+  Status = EFI_NOT_FOUND;
+  for (Index = 0; Index < ARRAY_SIZE (mLoadTries); Index++) {
+    if (mLoadTries[Index].UseBuffer) {
+      Status = LoadFromBuffer (
+                 Parent,
+                 Device,
+                 Path,
+                 Dp,
+                 mLoadTries[Index].BootPolicy,
+                 &Image
+                 );
+    } else {
+      Status = LoadFromPath (Parent, Dp, mLoadTries[Index].BootPolicy, &Image);
+    }
+    if (EFI_ERROR (Status)) {
+      PrintStatus (mLoadTries[Index].Name, Status);
+      continue;
+    }
+
+    FixupWindowsImage (Image, Device);
+    if (Dp != NULL) {
+      FreePool (Dp);
+    }
+    *OutImage = Image;
+    TuLogWide (L"preloaded %s via %s\r\n", Path, mLoadTries[Index].Name);
+    return EFI_SUCCESS;
+  }
+
+  if (Dp != NULL) {
+    FreePool (Dp);
+  }
   return Status;
 }
 
@@ -1211,6 +1273,187 @@ TuBootModeDetect (
   return TuBootModeUnmarked;
 }
 
+VOID
+TuChainloadClearPreload (
+  VOID
+  )
+{
+  if (mPreloadedImage != NULL) {
+    gBS->UnloadImage (mPreloadedImage);
+    mPreloadedImage  = NULL;
+    mPreloadedDevice = NULL;
+    GU_NOTE ("preload cleared\n");
+  }
+}
+
+BOOLEAN
+TuChainloadHasPreload (
+  VOID
+  )
+{
+  return mPreloadedImage != NULL;
+}
+
+STATIC
+EFI_STATUS
+PreloadFromDevice (
+  IN EFI_HANDLE                Parent,
+  IN EFI_HANDLE                Device,
+  IN EFI_DEVICE_PATH_PROTOCOL  *SelfPath,
+  IN BOOLEAN                   UseLoaderPrefix,
+  IN BOOLEAN                   RestoreOfficial
+  )
+{
+  EFI_STATUS  Status;
+  EFI_STATUS  Last;
+  EFI_HANDLE  Image;
+  UINTN       Index;
+  UINTN       OfficialSize;
+  BOOLEAN     IsWrapper;
+
+  if (RestoreOfficial) {
+    OfficialSize = 0;
+    IsWrapper    = FALSE;
+    Status       = InspectFile (Device, TU_MS_BOOT_OFFICIAL, &OfficialSize, &IsWrapper);
+    if (!EFI_ERROR (Status) && IsWrapper) {
+      Status = RestoreOfficialBootmgr (Device);
+      if (EFI_ERROR (Status)) {
+        TuLogWide (L"preload: could not restore signed bootmgfw before LoadImage\r\n");
+      }
+    }
+  }
+
+  Last = EFI_NOT_FOUND;
+  for (Index = 0; Index < ARRAY_SIZE (mCandidates); Index++) {
+    Status = LoadCandidateOnly (
+               Parent,
+               Device,
+               mCandidates[Index],
+               SelfPath,
+               UseLoaderPrefix,
+               &Image
+               );
+    if (!EFI_ERROR (Status) && (Image != NULL)) {
+      mPreloadedImage  = Image;
+      mPreloadedDevice = Device;
+      GU_NOTE ("preload ok candidate=%u\n", (unsigned)Index);
+      return EFI_SUCCESS;
+    }
+    Last = Status;
+  }
+  return Last;
+}
+
+STATIC
+EFI_STATUS
+PreloadFromInternalWindows (
+  IN EFI_HANDLE                Parent,
+  IN EFI_HANDLE                SelfDevice,
+  IN EFI_DEVICE_PATH_PROTOCOL  *SelfPath
+  )
+{
+  EFI_STATUS      Status;
+  TU_BOOT_TARGET  *List;
+  UINTN           Count;
+  BOOLEAN         Truncated;
+  UINTN           Index;
+
+  Status = CollectTargets (SelfDevice, &List, &Count, &Truncated);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if (Count == 0) {
+    FreePool (List);
+    return EFI_NOT_FOUND;
+  }
+
+  Status = EFI_NOT_FOUND;
+  for (Index = 0; Index < Count; Index++) {
+    if (StrCmp (List[Index].Title, L"Windows Boot Manager") != 0) {
+      continue;
+    }
+    Status = LoadCandidateOnly (
+               Parent,
+               List[Index].Device,
+               List[Index].Path,
+               SelfPath,
+               FALSE,
+               &mPreloadedImage
+               );
+    if (!EFI_ERROR (Status) && (mPreloadedImage != NULL)) {
+      mPreloadedDevice = List[Index].Device;
+      GU_NOTE ("preload ok from internal Windows Boot Manager\n");
+      FreePool (List);
+      return EFI_SUCCESS;
+    }
+  }
+
+  FreePool (List);
+  mPreloadedImage  = NULL;
+  mPreloadedDevice = NULL;
+  return Status;
+}
+
+EFI_STATUS
+TuChainloadPreload (
+  IN EFI_HANDLE    ImageHandle,
+  IN TU_BOOT_MODE  Mode
+  )
+{
+  EFI_STATUS                 Status;
+  EFI_LOADED_IMAGE_PROTOCOL  *Loaded;
+  EFI_DEVICE_PATH_PROTOCOL   *SelfPath;
+
+  TuChainloadClearPreload ();
+
+  Status = gBS->HandleProtocol (ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID **)&Loaded);
+  if (EFI_ERROR (Status)) {
+    PrintStatus (L"LoadedImage(preload)", Status);
+    return Status;
+  }
+
+  SelfPath = NULL;
+  (VOID)gBS->HandleProtocol (
+               ImageHandle,
+               &gEfiLoadedImageDevicePathProtocolGuid,
+               (VOID **)&SelfPath
+               );
+  if (SelfPath == NULL) {
+    SelfPath = Loaded->FilePath;
+  }
+
+  TuLogWide (L"preload Windows Boot Manager before disconnect/unlock\r\n");
+  GU_NOTE ("preload begin mode=%u\n", (unsigned)Mode);
+
+  if (Mode != TuBootModeUsb) {
+    Status = PreloadFromDevice (
+               ImageHandle,
+               Loaded->DeviceHandle,
+               SelfPath,
+               TRUE,
+               TRUE
+               );
+    if (!EFI_ERROR (Status)) {
+      TuShow (L"Windows Boot Manager preloaded.\r\n");
+      return EFI_SUCCESS;
+    }
+    if (Mode == TuBootModeEsp) {
+      TuLogWide (L"ESP preload failed; chainload will retry LoadImage later\r\n");
+      return Status;
+    }
+  }
+
+  Status = PreloadFromInternalWindows (ImageHandle, Loaded->DeviceHandle, SelfPath);
+  if (!EFI_ERROR (Status)) {
+    TuShow (L"Windows Boot Manager preloaded from internal disk.\r\n");
+    return EFI_SUCCESS;
+  }
+
+  TuLogWide (L"preload missed; unlock continues, chainload will LoadImage later\r\n");
+  GU_NOTE ("preload missed status=0x%lx\n", (UINTN)Status);
+  return Status;
+}
+
 EFI_STATUS
 TuChainloadWindows (
   IN EFI_HANDLE    ImageHandle,
@@ -1220,6 +1463,22 @@ TuChainloadWindows (
   EFI_STATUS                 Status;
   EFI_LOADED_IMAGE_PROTOCOL  *Loaded;
   EFI_DEVICE_PATH_PROTOCOL   *SelfPath;
+  EFI_HANDLE                 Image;
+
+  if (mPreloadedImage != NULL) {
+    Image = mPreloadedImage;
+    mPreloadedImage  = NULL;
+    mPreloadedDevice = NULL;
+    GU_NOTE ("chainload: StartImage preloaded Windows Boot Manager\n");
+    TuLogWide (L"Starting preloaded Windows Boot Manager...\r\n");
+    Status = StartWindowsImage (Image);
+    if (!EFI_ERROR (Status)) {
+      return Status;
+    }
+    PrintStatus (L"StartImage(preloaded)", Status);
+    gBS->UnloadImage (Image);
+    TuLogWide (L"preloaded StartImage failed; falling back to LoadImage path\r\n");
+  }
 
   Status = gBS->HandleProtocol (ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID **)&Loaded);
   if (EFI_ERROR (Status)) {

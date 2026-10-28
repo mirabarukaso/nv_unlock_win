@@ -3,6 +3,7 @@
 #define TU_ARCH_H
 
 #include "TuPci.h"
+#include "TuConfig.h"
 
 TU_ARCH
 TuArchFromDeviceId (
@@ -34,16 +35,25 @@ TuAdaIsDeviceId (
   IN UINT16  DeviceId
   );
 
+BOOLEAN
+TuAdaAdmitUnlock (
+  IN UINT16           DeviceId,
+  IN CONST TU_CONFIG  *Config,
+  IN CONST CHAR8      *BdfName
+  );
+
 INTN
 TuAmpereUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   );
 
 INTN
 TuAdaUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   );
 
 #endif

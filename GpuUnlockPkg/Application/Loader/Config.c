@@ -67,6 +67,16 @@ ApplyKey (
     Config->Verbose = (Value[0] != '0');
   } else if (AsciiStriCmp (Key, "targets") == 0) {
     AsciiStrCpyS (Config->Targets, sizeof (Config->Targets), Value);
+  } else if (AsciiStriCmp (Key, "rtx4080_experimental") == 0) {
+    Config->Rtx4080Experimental = (Value[0] != '0');
+  } else if (AsciiStriCmp (Key, "ad103_experimental") == 0) {
+    Config->Ad103Experimental = (Value[0] != '0');
+  } else if (AsciiStriCmp (Key, "ad106_experimental") == 0) {
+    Config->Ad106Experimental = (Value[0] != '0');
+  } else if (AsciiStriCmp (Key, "rtx4090d_experimental") == 0) {
+    Config->Rtx4090dExperimental = (Value[0] != '0');
+  } else if (AsciiStriCmp (Key, "skip_flr") == 0) {
+    Config->SkipFlr = (Value[0] != '0');
   }
 }
 

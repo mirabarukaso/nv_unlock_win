@@ -4,6 +4,10 @@
 #include "TuPci.h"
 
 #include <IndustryStandard/Pci.h>
+#include <Library/DevicePathLib.h>
+#include <Protocol/DevicePath.h>
+#include <Protocol/GraphicsOutput.h>
+#include <Protocol/SimpleTextOut.h>
 
 BOOLEAN
 TuPciIsSupportedDeviceId (
@@ -175,7 +179,7 @@ TuPciLogHandoff (
     Mb1     = 0xffffffffu;
     Bar     = 0;
     if (Gpus[Index].PciIo == NULL) {
-      GU_NOTE ("handoff phase=%a index=%u no pciio\n", Phase, (unsigned)Index);
+      GU_NOTE ("handoff phase=%a index=%u no pciio\n", Phase, (UINT32)Index);
       continue;
     }
     Gpus[Index].PciIo->Pci.Read (
@@ -274,8 +278,6 @@ TuPciScan (
     if (((ClassReg >> 24) & 0xffu) != TU_PCI_CLASS_DISPLAY) {
       continue;
     }
-    GU_NOTE ("NVIDIA PCI %04x:%04x handle=%p unlock=%u\n",
-             Vendor, Device, Handles[Index], TuPciIsSupportedDeviceId (Device));
     List[Found].PciIo           = PciIo;
     List[Found].Handle          = Handles[Index];
     List[Found].VendorId        = Vendor;
@@ -290,6 +292,27 @@ TuPciScan (
              &List[Found].Device,
              &List[Found].Function
              );
+    /* Log BDF on every scan (skip and inject). Menu redraw is screen-only. */
+    GU_NOTE (
+      "NVIDIA PCI %04x:%02x:%02x.%x 10de:%04x handle=%p unlock=%u\n",
+      (UINT32)List[Found].Segment,
+      (UINT32)List[Found].Bus,
+      (UINT32)List[Found].Device,
+      (UINT32)List[Found].Function,
+      Device,
+      Handles[Index],
+      TuPciIsSupportedDeviceId (Device)
+      );
+    TuLogWide (
+      L"Found %04x:%02x:%02x.%x  10de:%04x  %s%s\r\n",
+      List[Found].Segment,
+      List[Found].Bus,
+      List[Found].Device,
+      List[Found].Function,
+      Device,
+      TuArchName (List[Found].Arch),
+      List[Found].UnlockSupported ? L"" : L"  (readout-only)"
+      );
     TuPciReadFeat (&List[Found]);
     Found++;
   }
@@ -594,26 +617,30 @@ TuPciSaveConfig (
   return PciIo->Pci.Read (PciIo, EfiPciIoWidthUint8, 0, 256, Saved);
 }
 
-EFI_STATUS
-TuPciRestoreConfig (
-  IN EFI_PCI_IO_PROTOCOL  *PciIo,
-  IN CONST UINT8          Saved[256]
+STATIC
+UINT16
+TuPciCommandRestoreBits (
+  IN UINT16  Original,
+  IN UINT16  Live
   )
 {
-  return PciIo->Pci.Write (PciIo, EfiPciIoWidthUint8, 0, 256, (VOID *)Saved);
+  UINT16  Mask;
+
+  /* Match Linux gpu_unlock_command_restore(): MEMORY|MASTER from saved image. */
+  Mask = (UINT16)(EFI_PCI_COMMAND_MEMORY_SPACE | EFI_PCI_COMMAND_BUS_MASTER);
+  return (UINT16)((Live & (UINT16)~Mask) | (Original & Mask));
 }
 
+STATIC
 EFI_STATUS
-TuPciFlr (
-  IN EFI_PCI_IO_PROTOCOL  *PciIo
+TuPciFindExpCap (
+  IN EFI_PCI_IO_PROTOCOL  *PciIo,
+  OUT UINT8               *CapPtrOut
   )
 {
-  EFI_STATUS Status;
-  UINT8      CapPtr;
-  UINT8      CapId;
-  UINT16     DevCtl;
-  UINT16     DevSta;
-  UINTN      Wait;
+  EFI_STATUS  Status;
+  UINT8       CapPtr;
+  UINT8       CapId;
 
   Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint8, PCI_CAPBILITY_POINTER_OFFSET, 1, &CapPtr);
   if (EFI_ERROR (Status)) {
@@ -626,24 +653,8 @@ TuPciFlr (
       return Status;
     }
     if (CapId == EFI_PCI_CAPABILITY_ID_PCIEXP) {
-      Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, CapPtr + 8, 1, &DevCtl);
-      if (EFI_ERROR (Status)) {
-        return Status;
-      }
-      DevCtl |= BIT15;
-      Status  = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint16, CapPtr + 8, 1, &DevCtl);
-      if (EFI_ERROR (Status)) {
-        return Status;
-      }
-      gBS->Stall (100000);
-      for (Wait = 0; Wait < 50; Wait++) {
-        PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, CapPtr + 10, 1, &DevSta);
-        if ((DevSta & BIT5) == 0) {
-          return EFI_SUCCESS;
-        }
-        gBS->Stall (20000);
-      }
-      return EFI_TIMEOUT;
+      *CapPtrOut = CapPtr;
+      return EFI_SUCCESS;
     }
     Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint8, CapPtr + 1, 1, &CapPtr);
     if (EFI_ERROR (Status)) {
@@ -652,4 +663,531 @@ TuPciFlr (
     CapPtr &= 0xfc;
   }
   return EFI_UNSUPPORTED;
+}
+
+STATIC
+EFI_STATUS
+TuPciWaitTrpndClear (
+  IN EFI_PCI_IO_PROTOCOL  *PciIo,
+  IN UINT8                CapPtr
+  )
+{
+  EFI_STATUS  Status;
+  UINT16      DevSta;
+  UINTN       Wait;
+
+  for (Wait = 0; Wait < 50; Wait++) {
+    Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, CapPtr + 10, 1, &DevSta);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+    if (DevSta == 0xffff) {
+      return EFI_DEVICE_ERROR;
+    }
+    if ((DevSta & BIT5) == 0) {
+      return EFI_SUCCESS;
+    }
+    gBS->Stall (20000);
+  }
+  GU_ERROR ("PCIe DevSta TRPND still set: %#x\n", (UINT32)DevSta);
+  return EFI_TIMEOUT;
+}
+
+/*
+ * Selective post-FLR restore (Linux unlock_610 / pci_restore_state intent):
+ * restore BARs + COMMAND via MEMORY|MASTER from the pre-BME saved image,
+ * verify identity/BARs/COMMAND (MEMORY on, BME off), wait for TRPND clear.
+ * Do not blast all 256 config bytes (status is RW1C; blind write is risky).
+ */
+EFI_STATUS
+TuPciRestoreConfig (
+  IN EFI_PCI_IO_PROTOCOL  *PciIo,
+  IN CONST UINT8          Saved[256]
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      Identity;
+  UINT32      SavedId;
+  UINT32      Bar;
+  UINT32      ExpectedBar;
+  UINT16      Command;
+  UINT16      SavedCmd;
+  UINT16      Want;
+  UINT8       CapPtr;
+  UINT8       Byte;
+  UINT32      Index;
+
+  Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, 0, 1, &Identity);
+  if (EFI_ERROR (Status) || Identity == 0xffffffffu) {
+    GU_ERROR ("post-FLR config inaccessible before restore\n");
+    return EFI_DEVICE_ERROR;
+  }
+  SavedId = (UINT32)Saved[0] |
+            ((UINT32)Saved[1] << 8) |
+            ((UINT32)Saved[2] << 16) |
+            ((UINT32)Saved[3] << 24);
+  if (Identity != SavedId) {
+    GU_ERROR (
+      "post-FLR identity mismatch: actual=%#x expected=%#x (skip restore)\n",
+      Identity,
+      SavedId
+      );
+    return EFI_DEVICE_ERROR;
+  }
+
+  for (Index = 0; Index < 6; Index++) {
+    ExpectedBar = (UINT32)Saved[0x10 + Index * 4] |
+                  ((UINT32)Saved[0x11 + Index * 4] << 8) |
+                  ((UINT32)Saved[0x12 + Index * 4] << 16) |
+                  ((UINT32)Saved[0x13 + Index * 4] << 24);
+    Status = PciIo->Pci.Write (
+                         PciIo,
+                         EfiPciIoWidthUint32,
+                         (UINT32)(0x10u + Index * 4u),
+                         1,
+                         &ExpectedBar
+                         );
+    if (EFI_ERROR (Status)) {
+      GU_ERROR ("post-FLR BAR%u write failed: 0x%lx\n", (UINT32)Index, (UINTN)Status);
+      return Status;
+    }
+  }
+
+  ExpectedBar = (UINT32)Saved[0x30] |
+                ((UINT32)Saved[0x31] << 8) |
+                ((UINT32)Saved[0x32] << 16) |
+                ((UINT32)Saved[0x33] << 24);
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint32, 0x30, 1, &ExpectedBar);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  /* Cache Line Size + Latency Timer (do not touch Status at 0x06). */
+  Byte = Saved[0x0c];
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint8, 0x0c, 1, &Byte);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Byte = Saved[0x0d];
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint8, 0x0d, 1, &Byte);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Byte = Saved[0x3c];
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint8, 0x3c, 1, &Byte);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Byte = Saved[0x3d];
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint8, 0x3d, 1, &Byte);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, PCI_COMMAND_OFFSET, 1, &Command);
+  if (EFI_ERROR (Status) || Command == 0xffff) {
+    return EFI_DEVICE_ERROR;
+  }
+  SavedCmd = (UINT16)(Saved[PCI_COMMAND_OFFSET] | ((UINT16)Saved[PCI_COMMAND_OFFSET + 1] << 8));
+  Want     = TuPciCommandRestoreBits (SavedCmd, Command);
+  /* Linux post-FLR path keeps BME off until handoff containment is verified. */
+  Want = (UINT16)(Want & (UINT16)~EFI_PCI_COMMAND_BUS_MASTER);
+  if (!(Want & EFI_PCI_COMMAND_MEMORY_SPACE) && (SavedCmd & EFI_PCI_COMMAND_MEMORY_SPACE)) {
+    Want = (UINT16)(Want | EFI_PCI_COMMAND_MEMORY_SPACE);
+  }
+  Status = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint16, PCI_COMMAND_OFFSET, 1, &Want);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, PCI_COMMAND_OFFSET, 1, &Command);
+  if (EFI_ERROR (Status) || Command == 0xffff) {
+    return EFI_DEVICE_ERROR;
+  }
+  GU_NOTE (
+    "restore PCI command: actual=%#x saved=%#x mask=%#x\n",
+    Command,
+    SavedCmd,
+    (unsigned)(EFI_PCI_COMMAND_MEMORY_SPACE | EFI_PCI_COMMAND_BUS_MASTER)
+    );
+  if ((Command & EFI_PCI_COMMAND_BUS_MASTER) != 0 ||
+      (Command & EFI_PCI_COMMAND_MEMORY_SPACE) == 0)
+  {
+    GU_ERROR (
+      "post-FLR COMMAND bad: actual=%#x (need MEMORY=1 MASTER=0)\n",
+      Command
+      );
+    return EFI_DEVICE_ERROR;
+  }
+
+  for (Index = 0; Index < 6; Index++) {
+    ExpectedBar = (UINT32)Saved[0x10 + Index * 4] |
+                  ((UINT32)Saved[0x11 + Index * 4] << 8) |
+                  ((UINT32)Saved[0x12 + Index * 4] << 16) |
+                  ((UINT32)Saved[0x13 + Index * 4] << 24);
+    Status = PciIo->Pci.Read (
+                        PciIo,
+                        EfiPciIoWidthUint32,
+                        (UINT32)(0x10u + Index * 4u),
+                        1,
+                        &Bar
+                        );
+    if (EFI_ERROR (Status) || Bar != ExpectedBar) {
+      GU_ERROR (
+        "post-FLR BAR%u: actual=%#x expected=%#x\n",
+        (UINT32)Index,
+        Bar,
+        ExpectedBar
+        );
+      return EFI_DEVICE_ERROR;
+    }
+  }
+
+  Status = TuPciFindExpCap (PciIo, &CapPtr);
+  if (!EFI_ERROR (Status)) {
+    Status = TuPciWaitTrpndClear (PciIo, CapPtr);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+  }
+
+  return EFI_SUCCESS;
+}
+
+
+STATIC
+BOOLEAN
+TuPciDevicePathPrefix (
+  IN CONST EFI_DEVICE_PATH_PROTOCOL  *Prefix,
+  IN CONST EFI_DEVICE_PATH_PROTOCOL  *Path
+  )
+{
+  UINTN  PrefixSize;
+
+  if (Prefix == NULL || Path == NULL) {
+    return FALSE;
+  }
+  PrefixSize = GetDevicePathSize (Prefix);
+  if (PrefixSize < END_DEVICE_PATH_LENGTH) {
+    return FALSE;
+  }
+  /* Compare all nodes except the end node of Prefix. */
+  PrefixSize -= END_DEVICE_PATH_LENGTH;
+  if (PrefixSize == 0) {
+    return FALSE;
+  }
+  return CompareMem (Prefix, Path, PrefixSize) == 0;
+}
+
+STATIC
+BOOLEAN
+TuPciHandleUnderGpu (
+  IN EFI_HANDLE  GpuHandle,
+  IN EFI_HANDLE  Candidate
+  )
+{
+  EFI_STATUS                 Status;
+  EFI_DEVICE_PATH_PROTOCOL   *GpuPath;
+  EFI_DEVICE_PATH_PROTOCOL   *CandPath;
+
+  if (Candidate == NULL) {
+    return FALSE;
+  }
+  if (Candidate == GpuHandle) {
+    return TRUE;
+  }
+  Status = gBS->HandleProtocol (
+                  GpuHandle,
+                  &gEfiDevicePathProtocolGuid,
+                  (VOID **)&GpuPath
+                  );
+  if (EFI_ERROR (Status) || GpuPath == NULL) {
+    return FALSE;
+  }
+  Status = gBS->HandleProtocol (
+                  Candidate,
+                  &gEfiDevicePathProtocolGuid,
+                  (VOID **)&CandPath
+                  );
+  if (EFI_ERROR (Status) || CandPath == NULL) {
+    return FALSE;
+  }
+  return TuPciDevicePathPrefix (GpuPath, CandPath);
+}
+
+STATIC
+VOID
+TuPciDisconnectOne (
+  IN EFI_HANDLE    Controller,
+  IN CONST CHAR8   *Label
+  )
+{
+  EFI_STATUS  Status;
+
+  if (Controller == NULL) {
+    return;
+  }
+  Status = gBS->DisconnectController (Controller, NULL, NULL);
+  GU_NOTE (
+    "pre-FLR: DisconnectController %a handle=%p status=0x%lx\n",
+    Label,
+    Controller,
+    (UINTN)Status
+    );
+}
+
+/*
+ * Best-effort console/GOP detach before Ada/Ampere FLR on a primary GPU.
+ * Mirrors Latence AD104 stages (TextOut -> GraphicsConsole/GOP -> PCI agent)
+ * without the MSI-specific graph: disconnect matching TextOut/GOP children,
+ * then disconnect drivers bound to the GPU PCI handle. PciIo installed by the
+ * PCI bus remains available via HandleProtocol.
+ */
+EFI_STATUS
+TuPciDisconnectDisplay (
+  IN EFI_HANDLE  GpuHandle
+  )
+{
+  EFI_STATUS                           Status;
+  EFI_HANDLE                           *Handles;
+  UINTN                                Count;
+  UINTN                                Index;
+  EFI_OPEN_PROTOCOL_INFORMATION_ENTRY  *OpenInfo;
+  UINTN                                OpenCount;
+  UINTN                                OpenIndex;
+  BOOLEAN                              ConOnGpu;
+  UINTN                                ChildCount;
+
+  if (GpuHandle == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  /*
+   * Latence AD104 / AD103-2705 Windows ports (#39, #92): release console/GOP
+   * ownership before PCIe FLR on the primary GPU. Working 2705 boots blank the
+   * console ~1s at FLR/GOP reconnect - not a machine power-cycle. Also detach
+   * gopless display children (BY_CHILD without GraphicsOutput); a pinned GOP
+   * path alone misses boards with multiple ACPI display children.
+   *
+   * DisconnectController(Controller, NULL, NULL) drops every driver bound to
+   * that controller. PciIo installed by the PCI bus stays via HandleProtocol.
+   */
+  GU_NOTE ("pre-FLR: driver_release TextOut/GOP/display-children begin\n");
+  ConOnGpu   = FALSE;
+  ChildCount = 0;
+
+  /* Stage 1: SimpleTextOut under this GPU (GraphicsConsole / splitter children). */
+  Handles = NULL;
+  Count   = 0;
+  Status  = gBS->LocateHandleBuffer (
+                   ByProtocol,
+                   &gEfiSimpleTextOutProtocolGuid,
+                   NULL,
+                   &Count,
+                   &Handles
+                   );
+  if (!EFI_ERROR (Status) && Handles != NULL) {
+    for (Index = 0; Index < Count; Index++) {
+      if (TuPciHandleUnderGpu (GpuHandle, Handles[Index])) {
+        if (gST != NULL && gST->ConsoleOutHandle == Handles[Index]) {
+          ConOnGpu = TRUE;
+        }
+        TuPciDisconnectOne (Handles[Index], "TextOut");
+      }
+    }
+    FreePool (Handles);
+  }
+
+  /* Stage 2: GraphicsOutput under this GPU. */
+  Handles = NULL;
+  Count   = 0;
+  Status  = gBS->LocateHandleBuffer (
+                   ByProtocol,
+                   &gEfiGraphicsOutputProtocolGuid,
+                   NULL,
+                   &Count,
+                   &Handles
+                   );
+  if (!EFI_ERROR (Status) && Handles != NULL) {
+    for (Index = 0; Index < Count; Index++) {
+      if (TuPciHandleUnderGpu (GpuHandle, Handles[Index])) {
+        if (gST != NULL && gST->ConsoleOutHandle == Handles[Index]) {
+          ConOnGpu = TRUE;
+        }
+        TuPciDisconnectOne (Handles[Index], "GOP");
+      }
+    }
+    FreePool (Handles);
+  }
+
+  /* Stage 2b: every PciIo BY_CHILD (includes gopless display children). */
+  OpenInfo  = NULL;
+  OpenCount = 0;
+  Status = gBS->OpenProtocolInformation (
+                  GpuHandle,
+                  &gEfiPciIoProtocolGuid,
+                  &OpenInfo,
+                  &OpenCount
+                  );
+  if (!EFI_ERROR (Status) && OpenInfo != NULL) {
+    for (OpenIndex = 0; OpenIndex < OpenCount; OpenIndex++) {
+      if ((OpenInfo[OpenIndex].Attributes & EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER) != 0) {
+        ChildCount++;
+        TuPciDisconnectOne (OpenInfo[OpenIndex].ControllerHandle, "display-child");
+      }
+    }
+    FreePool (OpenInfo);
+  }
+
+  /* Stage 3: detach NVIDIA (and any other) drivers bound to the GPU PCI handle. */
+  TuPciDisconnectOne (GpuHandle, "PCI");
+
+  if (ConOnGpu && gST != NULL) {
+    /* Avoid OutputString into a dead framebuffer; file log remains. */
+    GU_NOTE ("pre-FLR: console was on unlock GPU; clearing ConOut pointer\n");
+    gST->ConOut = NULL;
+  }
+
+  /* Brief settle before Initiate FLR (working 2705 path blanks ~1s around FLR). */
+  gBS->Stall (100000);
+
+  GU_NOTE (
+    "pre-FLR: driver_release done con_on_gpu=%u display_children=%u\n",
+    ConOnGpu,
+    ChildCount
+    );
+  return EFI_SUCCESS;
+}
+
+/*
+ * TOTORONG AD103 Windows unlocker / working #92 handoff: after FLR, reconnect
+ * the GPU so NVIDIA GOP (and console children) bind again before StartImage.
+ * Best-effort; unlock selectors are observed separately by the Ada path.
+ */
+EFI_STATUS
+TuPciReconnectDisplay (
+  IN EFI_HANDLE  GpuHandle
+  )
+{
+  EFI_STATUS                       Status;
+  EFI_HANDLE                       *Handles;
+  UINTN                            Count;
+  UINTN                            Index;
+  EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL  *Out;
+
+  if (GpuHandle == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  GU_NOTE ("post-FLR: reconnect GOP begin handle=%p\n", GpuHandle);
+  Status = gBS->ConnectController (GpuHandle, NULL, NULL, TRUE);
+  GU_NOTE (
+    "post-FLR: ConnectController GPU status=0x%lx\n",
+    (UINTN)Status
+    );
+
+  /* Recursive connect above should rebind children; nudge console if cleared. */
+  if ((gST != NULL) && (gST->ConOut == NULL)) {
+    Out = NULL;
+    if ((gST->ConsoleOutHandle != NULL) &&
+        !EFI_ERROR (
+           gBS->HandleProtocol (
+                  gST->ConsoleOutHandle,
+                  &gEfiSimpleTextOutProtocolGuid,
+                  (VOID **)&Out
+                  )) &&
+        (Out != NULL))
+    {
+      gST->ConOut = Out;
+      GU_NOTE ("post-FLR: restored ConOut from ConsoleOutHandle\n");
+    } else {
+      Handles = NULL;
+      Count   = 0;
+      Status  = gBS->LocateHandleBuffer (
+                       ByProtocol,
+                       &gEfiSimpleTextOutProtocolGuid,
+                       NULL,
+                       &Count,
+                       &Handles
+                       );
+      if (!EFI_ERROR (Status) && (Handles != NULL) && (Count > 0)) {
+        for (Index = 0; Index < Count; Index++) {
+          Out = NULL;
+          if (!EFI_ERROR (
+                 gBS->HandleProtocol (
+                        Handles[Index],
+                        &gEfiSimpleTextOutProtocolGuid,
+                        (VOID **)&Out
+                        )) &&
+              (Out != NULL))
+          {
+            gST->ConsoleOutHandle = Handles[Index];
+            gST->ConOut           = Out;
+            GU_NOTE ("post-FLR: rebound ConOut handle=%p\n", Handles[Index]);
+            break;
+          }
+        }
+        FreePool (Handles);
+      }
+    }
+  }
+
+  gBS->Stall (100000);
+  GU_NOTE ("post-FLR: reconnect GOP done\n");
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS
+TuPciFlr (
+  IN EFI_PCI_IO_PROTOCOL  *PciIo
+  )
+{
+  EFI_STATUS  Status;
+  UINT8       CapPtr;
+  UINT16      DevCtl;
+  UINT32      DevCap;
+  UINT32      Identity;
+  UINTN       Wait;
+
+  Status = TuPciFindExpCap (PciIo, &CapPtr);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  /* Device Capabilities +4: Function Level Reset Capable is bit 28. */
+  Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, CapPtr + 4, 1, &DevCap);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if ((DevCap & BIT28) == 0) {
+    GU_ERROR ("PCIe FLR not supported by DEVCAP=%#x\n", DevCap);
+    return EFI_UNSUPPORTED;
+  }
+
+  Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint16, CapPtr + 8, 1, &DevCtl);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  DevCtl |= BIT15; /* Initiate Function Level Reset */
+  Status  = PciIo->Pci.Write (PciIo, EfiPciIoWidthUint16, CapPtr + 8, 1, &DevCtl);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  /* Linux pcie_flr waits >=100ms then until config space returns. */
+  gBS->Stall (100000);
+  Status = TuPciWaitTrpndClear (PciIo, CapPtr);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  for (Wait = 0; Wait < 50; Wait++) {
+    Status = PciIo->Pci.Read (PciIo, EfiPciIoWidthUint32, 0, 1, &Identity);
+    if (!EFI_ERROR (Status) && Identity != 0xffffffffu && Identity != 0) {
+      GU_NOTE ("PCIe FLR complete: identity=%#x\n", Identity);
+      return EFI_SUCCESS;
+    }
+    gBS->Stall (20000);
+  }
+  GU_ERROR ("PCIe FLR config space did not return\n");
+  return EFI_TIMEOUT;
 }

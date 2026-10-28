@@ -5,7 +5,7 @@
 #include <Uefi.h>
 
 #define TU_LOADER_MAGIC        "TURING_UNLOCK_LOADER_v1"
-#define TU_LOADER_VERSION      "0.2.7"
+#define TU_LOADER_VERSION      "0.2.12"
 
 #if defined(TU_BUILD_ARCH_TURING)
 # if defined(TU_BUILD_ARCH_AMPERE) || defined(TU_BUILD_ARCH_ADA)
@@ -45,6 +45,11 @@ typedef struct {
   BOOLEAN      NoChainload;
   BOOLEAN      ForceInject;
   BOOLEAN      ForceSkip;
+  BOOLEAN      Rtx4080Experimental;
+  BOOLEAN      Ad103Experimental;
+  BOOLEAN      Ad106Experimental;
+  BOOLEAN      Rtx4090dExperimental;
+  BOOLEAN      SkipFlr;
   CHAR8        Targets[128];
 } TU_CONFIG;
 

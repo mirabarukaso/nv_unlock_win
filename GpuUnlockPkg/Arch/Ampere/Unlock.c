@@ -72,6 +72,7 @@ struct tu_work {
   BOOLEAN                            GspStarted;
   BOOLEAN                            SecStarted;
   BOOLEAN                            Quiesced;
+  BOOLEAN                            SkipFlr;
   BOOLEAN                            Published;
   BOOLEAN                            PayloadVerified;
   struct firmware                    BooterFw;
@@ -912,13 +913,48 @@ ampere_flr (
     TuPciClearMaster (w->PciIo);
     w->MasterOn = FALSE;
   }
-  GU_NOTE ("PCIe FLR begin: chip=%#x\n", chip);
+  /* Latence-style: detach TextOut / GraphicsConsole / NVIDIA GOP before FLR. */
+  (VOID)TuPciDisconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+
+  if (w->SkipFlr) {
+    GU_NOTE (
+      "skip_flr=1: skipping PCIe FLR after SS/readout success (experimental)\n"
+      );
+    TuLogWide (
+      L"skip_flr=1: PCIe FLR skipped; chainload continues with unlock state.\r\n"
+      );
+    w->Quiesced = TRUE;
+    if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+      return GU_DIAG (-EIO);
+    }
+    (VOID)TuPciReconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+    ss0 = rd (w, GU_FEAT_SS0_OFFSET);
+    ss1 = rd (w, GU_FEAT_SS1_OFFSET);
+    plm = rd (w, GU_FEAT_PLM_OFFSET);
+    GU_NOTE (
+      "post-GOP-reconnect: SS0=%#x SS1=%#x PLM=%#x (skip_flr)\n",
+      ss0, ss1, plm
+      );
+    if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+      return GU_DIAG (-EIO);
+    }
+    return 0;
+  }
+
+  GU_NOTE ("PCIe FLR begin: BME=0 chip=%#x\n", chip);
   Status = TuPciFlr (w->PciIo);
+  GU_NOTE ("PCIe FLR returned: 0x%lx\n", (UINTN)Status);
   if (EFI_ERROR (Status)) {
     return GU_DIAG (-EIO);
   }
-  if (w->CfgSaved) {
-    TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+  if (!w->CfgSaved) {
+    GU_ERROR ("post-FLR: no saved PCI config image\n");
+    return GU_DIAG (-EIO);
+  }
+  Status = TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+  if (EFI_ERROR (Status)) {
+    GU_ERROR ("post-FLR config restore failed: 0x%lx\n", (UINTN)Status);
+    return GU_DIAG (-EIO);
   }
   for (i = 0; i < 1000; i++) {
     value = rd (w, 0);
@@ -957,6 +993,18 @@ ampere_flr (
     return GU_DIAG (-EBUSY);
   }
   w->Quiesced = TRUE;
+  if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
+    return GU_DIAG (-EIO);
+  }
+
+  (VOID)TuPciReconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+  ss0 = rd (w, GU_FEAT_SS0_OFFSET);
+  ss1 = rd (w, GU_FEAT_SS1_OFFSET);
+  plm = rd (w, GU_FEAT_PLM_OFFSET);
+  GU_NOTE (
+    "post-GOP-reconnect: SS0=%#x SS1=%#x PLM=%#x\n",
+    ss0, ss1, plm
+    );
   if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK) {
     return GU_DIAG (-EIO);
   }
@@ -1083,8 +1131,9 @@ firmware_quiesced (
 
 INTN
 TuAmpereUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   )
 {
   struct tu_work *w;
@@ -1100,6 +1149,10 @@ TuAmpereUnlockGpu (
   w->Gpu         = Gpu;
   w->PciIo       = Gpu->PciIo;
   w->BarIndex    = Gpu->BarIndex;
+  w->SkipFlr     = (Config != NULL && Config->SkipFlr);
+  if (w->SkipFlr) {
+    GU_NOTE ("skip_flr=1 enabled (experimental): FLR will be skipped after selectors\n");
+  }
 
   ret = load_fw (w, BOOTER_FILE, &w->BooterFw);
   if (ret) {
@@ -1270,12 +1323,26 @@ TuAmpereUnlockGpu (
 
 out:
   if (ret && w->FirmwareStarted && !w->Quiesced) {
-    (VOID)TuPciFlr (w->PciIo);
-    if (w->CfgSaved) {
-      TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+    EFI_STATUS  FlrSt;
+
+    if (w->SkipFlr) {
+      GU_NOTE ("skip_flr=1: skipping abort FLR\n");
+      w->Quiesced = TRUE;
+      w->MasterOn = FALSE;
+    } else {
+      (VOID)TuPciDisconnectDisplay (w->Gpu != NULL ? w->Gpu->Handle : NULL);
+      FlrSt = TuPciFlr (w->PciIo);
+      if (EFI_ERROR (FlrSt)) {
+        GU_ERROR ("abort FLR failed: 0x%lx\n", (UINTN)FlrSt);
+      } else if (w->CfgSaved) {
+        FlrSt = TuPciRestoreConfig (w->PciIo, w->SavedCfg);
+        if (EFI_ERROR (FlrSt)) {
+          GU_ERROR ("abort config restore failed: 0x%lx\n", (UINTN)FlrSt);
+        }
+      }
+      w->Quiesced = TRUE;
+      w->MasterOn = FALSE;
     }
-    w->Quiesced = TRUE;
-    w->MasterOn = FALSE;
   }
   if (!firmware_quiesced (w)) {
     GU_ERROR ("firmware did not stop; leaving DMA until power off\n");

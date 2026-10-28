@@ -48,9 +48,24 @@ UefiMain (
   }
   TuLogWide (L"NVIDIA display GPUs: %u\r\n", GpuCount);
 
-  Action = TuMenuChoose (&Config, Gpus, GpuCount);
+  BootMode = TuBootModeDetect (ImageHandle);
+  Action   = TuMenuChoose (&Config, Gpus, GpuCount);
   if (Action == TuActionInject) {
     UINTN Index;
+
+    /*
+     * TOTORONG AD103 Windows unlocker order:
+     * preload bootmgfw -> disconnect/unlock/FLR -> reconnect GOP ->
+     * observe selectors -> StartImage.
+     */
+    Status = TuChainloadPreload (ImageHandle, BootMode);
+    if (EFI_ERROR (Status)) {
+      GU_NOTE ("preload status=0x%lx (non-fatal; LoadImage later)\n", (UINTN)Status);
+      TuLogWide (
+        L"preload bootmgfw missed (%r); will LoadImage after unlock\r\n",
+        Status
+        );
+    }
 
     Status = TuUnlockAll (ImageHandle, &Config, Gpus, GpuCount);
     GU_NOTE ("inject finished status=%x\n", Status);
@@ -61,6 +76,7 @@ UefiMain (
     TuMenuPrintFeat (Gpus, GpuCount);
     TuMenuWaitContinue (TU_POST_INJECT_WAIT_SEC);
   } else {
+    TuChainloadClearPreload ();
     TuLogWide (L"Inject skipped. Continuing to boot.\r\n");
     GU_NOTE ("inject skipped by menu action=%u\n", (unsigned)Action);
   }
@@ -71,7 +87,6 @@ UefiMain (
     (Action == TuActionInject) ? "inject" :
     (Action == TuActionEmergency) ? "emergency" : "skip"
     );
-  BootMode = TuBootModeDetect (ImageHandle);
   TuLogWide (
     L"Boot mode: %a\r\n",
     (BootMode == TuBootModeEsp) ? "esp" :
@@ -88,6 +103,7 @@ UefiMain (
   if (Config.NoChainload) {
     UINTN Index;
 
+    TuChainloadClearPreload ();
     TuShow (L"--noload: not chainloading. Press any key.\r\n");
     gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
     gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);

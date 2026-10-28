@@ -3,8 +3,11 @@
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
 > - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
-> - **RTX 4090**（AD102，`10de:2684`），Windows 10，驱动 595.79。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM（FP32 累加）从 135.9 升到 156.3 TFLOPS（+15%）。1024 和 2048 没有变化。
+> - **RTX 4090**（AD102，`10de:2684`）— **需重新验证**。Windows 10，驱动 595.79。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。此前发布的 Windows GEMM 数字已**暂时撤回**，等待重测（解锁后的 **RTX 4080** 0.2.12 MMA 已超过旧的 4090 公布数据）。基线 ID `2684` 的配置支持不变。
 >
+
+> [!NOTE]
+> **Ada / RTX 4080 已在 loader 0.2.12 验证。** 代测的 Windows Inject（`10de:2704`）：`AD102 FEAT UNLOCKED`，随后 `mma_bench_sm89` 在 `f16/f32` / `bf16/f32` / `fp8/e4m3` 约 **2×**（对照项基本持平）。需要 `rtx4080_experimental=1` 以及 `targets` 里的 **精确** PCI BDF（不能用 `all`）。解锁仅当前会话有效；Inject 测试之间请关闭 **快速启动**。各卡 Ada 开关（含公版 **RTX 4090** `2684` 与实验性 **4090 D** `2685`）、注册表步骤与完整 MMA 表见 **[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 
 # GPU Unlock UEFI loader (Windows)
 
@@ -12,7 +15,7 @@
 
 Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，可选解锁 GPU，再启动内部磁盘上的 Windows、GRUB、systemd-boot 或其它 x64 EFI 加载器。U 盘不改内部 EFI 系统分区（ESP），固件启动菜单仍然可以启动已经装在那里的系统。
 
-版本 `0.2.7`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
+版本 `0.2.12`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
 
 多数人看到 [使用](#使用) 即可：下载 release 里的 EFI，生成对应 firmware，拷到 U 盘。[从头编译](#从头编译) 只在你要自己编 EFI 时才需要。
 
@@ -34,25 +37,26 @@ Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，�
 4. [U 盘](#u-盘)
 5. [启动菜单](#启动菜单)
 6. [启动日志](#启动日志)
-7. [机器起不来](#机器起不来)
-8. [实测结果](#实测结果)
+7. [Ada / RTX 40 系](#ada--rtx-40-系) → 细节 [docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)
+8. [机器起不来](#机器起不来)
+9. [实测结果](#实测结果)
 
 **高级**
 
-9. [ESP 安装](#esp-安装)
+10. [ESP 安装](#esp-安装)
 
 **从头编译**
 
-10. [准备条件](#准备条件)
-11. [下载工具链](#下载工具链)
-12. [准备和编译](#准备和编译)
-13. [清理](#清理)
-14. [Hyper-V 虚拟机](#hyper-v-虚拟机)
-15. [编译排障](#编译排障)
-16. [布局](#布局)
+11. [准备条件](#准备条件)
+12. [下载工具链](#下载工具链)
+13. [准备和编译](#准备和编译)
+14. [清理](#清理)
+15. [Hyper-V 虚拟机](#hyper-v-虚拟机)
+16. [编译排障](#编译排障)
+17. [布局](#布局)
 
-17. [许可证](#许可证)
-18. [更新记录](#更新记录)
+18. [许可证](#许可证)
+19. [更新记录](#更新记录)
 
 ---
 
@@ -126,7 +130,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\New-GpuUnlockUsb.ps1 -DriveLett
 ### 启动菜单
 
 ```
-GPU Unlock Loader 0.2.7 (Turing)
+GPU Unlock Loader 0.2.12 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -158,7 +162,7 @@ NVMe ns=1 part=1
 
 ### 启动日志
 
-选中的加载器启动前，U 盘上会有 `\EFI\turing-unlock\unlock.log`。里面有 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）、`boot mode=usb`，以及注入后每张卡一行 `unlock 10de:<id> result=<errno>`。`inject finished status=0` 表示每张尝试过的卡都返回 0。失败时这条是 `status=8000000000000007`（`EFI_DEVICE_ERROR`）。启动项列表仍会出现。选中项记成 `boot choice <n> <title> <path>`。
+选中的加载器启动前，U 盘上会有 `\EFI\turing-unlock\unlock.log`。PCI 扫描总会为每张卡写一行 `Found <seg:bus:dev.fn>  10de:<id>  <Arch>`（Skip 和 Inject 都有）。里面还有 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）、`boot mode=usb`，以及注入后每张卡一行 `unlock 10de:<id> result=<errno>`。`inject finished status=0` 表示每张尝试过的卡都返回 0。失败时这条是 `status=8000000000000007`（`EFI_DEVICE_ERROR`）。启动项列表仍会出现。选中项记成 `boot choice <n> <title> <path>`。
 
 日志留在 U 盘上。启动一个能读这块 FAT 的系统后把文件拷出来。过程记录都在这个文件里，屏幕上的一次性结果（选项、解锁结果、chainload 错误）也会写进去。菜单每秒重画一次，不会重复写进文件。要在屏幕上同时看到文件内容，把 `config.ini` 里的 `verbose` 改成 `1`。
 
@@ -167,6 +171,26 @@ NVMe ns=1 part=1
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 ```
+
+### Ada / RTX 40 系
+
+公版 **RTX 4090**（`10de:2684`）是 Ada **基线** ID：用 `UnlockLoader-Ada.efi`，`targets=all`（或列出 BDF），**不需要**实验开关。Inject/启动支持仍有效；此前发布的 Windows GEMM 数字已**撤回**，等待重测（**需重新验证**）。
+
+本树里其余 Ada ID 要开 config 开关；其中若干还必须写 **精确** BDF。摘要：
+
+| 卡 | ID | 开关 | `targets` |
+| --- | --- | --- | --- |
+| RTX 4090 | `2684` | *（基线）* | `all` 或 BDF |
+| RTX 4090 D | `2685` | `rtx4090d_experimental=1` | `all` 或 BDF |
+| RTX 4080 | `2704` | `rtx4080_experimental=1` | **精确 BDF** |
+| RTX 4080 SUPER | `2702` | `ad103_experimental=1` | **精确 BDF** |
+| AD103 canary | `2705` | `ad103_experimental=1` | **精确 BDF** |
+| AD106 | `2805` | `ad106_experimental=1` | **精确 BDF** |
+
+- 解锁仅当前会话；重启后需再 Inject。
+- Inject 测试之间请关闭 **快速启动**（设置界面或 `HiberbootEnabled=0`；键缺失时常见默认视为开启）。完整注册表步骤：[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md#操作注意4080--主显示-gpu)。
+- Ada Windows handoff（0.2.12+）致谢 [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker)（代码 GPL-2.0-only；其新写说明文档 CC BY-NC 4.0）。详见 [docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md#致谢ada-windows-handoff)。
+- 各卡完整示例、取 BDF、`skip_flr`、快速启动 / `HiberbootEnabled`、TOTORONG 致谢与 4080 MMA 全表：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 
 ### 机器起不来
 
@@ -226,16 +250,12 @@ python .\bench\gemm_bf16.py --sizes 1024,2048,4096,8192 --repeat 80
 
 Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W。两边显存时钟都是 9251 MHz。
 
-**RTX 4090**（`10de:2684`，AD102），2026-10-28，Windows 10，驱动 595.79，PyTorch 2.11.0+cu130，CUDA 13.0，功耗墙 450 W。Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`。Windows 正常启动，设备错误码 0。前后各三轮，表内是中位数。1024 和 2048 没有变化。8192 注入后的每一轮都高于基线的每一轮。
+**RTX 4090**（`10de:2684`，AD102）— **需重新验证。** Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`；Windows 正常启动。本 SKU 此前发布的 Windows cuBLAS FP16 GEMM 数字已**暂时撤回**，等待重测：解锁后的 **RTX 4080** 0.2.12 `mma_bench_sm89` 已超过旧的 4090 公布数据。基线 Ada 配置（`2684`）不变。
 
-| M.N.K | skip | 注入后 | 变化 |
-| ---: | ---: | ---: | ---: |
-| 1024 | 104.9 | 104.9 | 0% |
-| 2048 | 164.5 | 164.5 | 0% |
-| 4096 | 155.9 | 151.6 | −2.8% |
-| 8192 | 135.9 | 156.3 | +15% |
 
-Linux 上的 Ada 报告把两种测量分开。4090 上寄存器驻留的 FP16/FP32 指令发射率大约是 2 倍（约 165 到 330 TFLOPS）。同一类卡上的 cuBLAS GEMM 小得多，按尺寸大约 12–34%，一次持续负载的 Windows 8192³ BF16 GEMM 大约 +5%。卡顶在功耗墙上，GEMM 到不了发射率的倍数。这次 UEFI 的 FP16 GEMM 和那个幅度一致。这张卡的 BF16 GEMM 还没有测。
+**RTX 4080**（`10de:2704`）：loader **0.2.12** Inject 已用 `mma_bench_sm89` 验证（`f16/f32` / `bf16/f32` / `fp8/e4m3` 约 2×）。完整库存对比表与操作说明见 [docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md#mma-结果rtx-4080-0212)。本 SKU **不要**只靠 cuBLAS FP16/BF16 GEMM 当解锁证明。
+
+在 Ada 上，寄存器驻留的指令发射率探针（如 `mma_bench_sm89`）与大尺寸 cuBLAS GEMM 经常差很多：GEMM 往往顶在功耗墙上。解锁证明请优先用发射率探针。本树里旧的 **RTX 4090** Windows GEMM 增量已撤回（**需重新验证**）。
 
 GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很高，可能损坏硬件。
 
@@ -245,7 +265,7 @@ GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很�
 | --- | --- |
 | 启动菜单里没有这块 U 盘，或看不到 loader 菜单 | Secure Boot 仍开着，或固件启动菜单没有选这块 U 盘 |
 | `firmware missing` / `load_fw error=-2` | 生成该架构的 blob，再跑一次 `New-GpuUnlockUsb.ps1` |
-| 菜单不是 `0.2.7 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
+| 菜单不是 `0.2.12 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
 | 菜单里键盘没反应 | 0.2.3 及以后会在进菜单前连接 USB。用当前 EFI 重写 U 盘 |
 | RTX 3070 Ti 注入后一直黑屏 | 等大约 1 分钟。实测启动就是这样，然后进入了 Windows |
 | 列表里没有内部磁盘 | 固件没有在 NVMe 或 SATA 上挂出 FAT EFI 分区，或那里唯一的加载器就是这份未签名包装器 |
@@ -387,7 +407,7 @@ Prepare 检查 Windows x64、VS2022 C++（17.x）、Python 3.6+、NASM 2.15.05+�
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.7`）。
+`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.12`）。
 
 Ada 用 AD102 的 Linux 事务（four-PLM V67，然后 FLR）。Ampere 用 GA102 的 Linux 事务（V67、选择器，然后 FLR）。Turing 写选择器，不做 FLR。
 
@@ -429,7 +449,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
 2. 关机。设置 → 安全 → 取消 **启用安全启动**。
 3. 把 `build\UnlockLoader-Turing.efi` 和 `tools\` 拷进虚拟机。
 4. 在虚拟机里用管理员 PowerShell 跑 ESP 安装。
-5. 重启。菜单应显示 `GPU Unlock Loader 0.2.7 (Turing)`。回车或超时后应进入 Windows。
+5. 重启。菜单应显示 `GPU Unlock Loader 0.2.12 (Turing)`。回车或超时后应进入 Windows。
 
 没有直通 GPU 时，Inject 打印 `gpu_count=0`，不写 MMIO。
 
@@ -467,7 +487,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
   edk2/                    本地下载，不入库
   LICENSE                  GPL-2.0-only
   NOTICE                   署名
-  VERSION                  0.2.7
+  VERSION                  0.2.12
   README.md                英文
   README_zh.md             中文
 ```
@@ -483,6 +503,18 @@ NVIDIA firmware 仍受 NVIDIA 许可约束，不在 git 里。
 ---
 
 ## 更新记录
+
+`0.2.12` 按 TOTORONG AD103 Windows unlocker 调整 handoff：Inject 前尽量 LoadImage（preload）`bootmgfw`；保留 FLR 前 `driver_release`；FLR 后 `ConnectController` 重连 GOP，再观察选择器，最后 StartImage 预加载镜像（失败则回退到原来的 LoadImage 路径）。Ada/Ampere 成功路径均写 `post-GOP-reconnect` 日志。解锁 payload 未改。
+
+文档（同版本树）：补充 RTX 4080 在 0.2.12 inject 上的 MMA ~2× 发射率验证（`10de:2704`，`skip_flr=0`）；实验性章节写明快速启动 / `HiberbootEnabled` 注册表、会话级解锁，以及用 `mma_bench_sm89` 做 Ada 解锁核对。
+
+`0.2.11` 在 Ada/Ampere PCIe FLR 前增加控制台/GOP/display-child 断开（Latence 风格 `driver_release`），以及可选 `skip_flr=1` 用来隔离主 GPU FLR 重启。Disconnect 覆盖 TextOut、GPU 下的 GraphicsOutput、每个 PciIo BY_CHILD（无 GOP 的显示子设备；上游 AD103 Windows #39 / #92），再断 GPU PCI 句柄。#92 上 Windows 2705 在 FLR/GOP 重连时空白约 1 秒——不是整机断电重启；快速启动应关闭。Ada 解锁事务相对 0.2.10 未改。
+
+`0.2.10` 按 Linux `gpu-unlock-ada`（`unlock_610` / `gpu_unlock_command_restore`）加固 UEFI PCIe FLR / 配置恢复：Initiate FLR 之后选择性还原 BAR，COMMAND 恢复为 MEMORY on / BME off，核对 BAR + identity，并清 DevSta TRPND。identity 不一致时跳过盲目的 256 字节配置写。Ada 解锁事务未改。
+
+`0.2.9` PCI 扫描在 skip 和 inject 的 `unlock.log` 里写入每张 GPU 的 BDF（`Found <seg:bus:dev.fn>  10de:<id>`）。0.2.9 之前的 skip 日志只有设备 ID。README 写明 RTX 4080 实验性操作：开关 + 精确 `targets` BDF（`targets=all` 永不放行 4080）。
+
+`0.2.8` 为实验性 RTX 4080（`10de:2704`）和 RTX 4080 SUPER（`10de:2702`）增加 Ada 准入。两者都要 config.ini 开关（`rtx4080_experimental` / `ad103_experimental`）以及 `targets` 里的精确 PCI BDF（不能靠 `targets=all`）。已有实验性 Ada ID（`2685`、`2705`、`2805`）用同样风格的门。解锁路由用显式 `ad102_family()` 映射到固定的 AD102 资产；没有按 ID 的 fuse/SM/VBIOS 表。只读 readout 的 Ada ID 不再被强制注入。
 
 `0.2.7` 用上下键选择注入、跳过和 U 盘上的启动项。过程日志写入 `unlock.log`。屏幕保留菜单、结果和错误。`verbose` 默认是 `0`。`tools\Hide-GpuUnlockEsp.ps1` 去掉内部 EFI 系统分区的盘符。
 

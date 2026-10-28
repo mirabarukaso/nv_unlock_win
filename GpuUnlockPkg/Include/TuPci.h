@@ -117,6 +117,22 @@ TuPciMemReadBuffer (
   OUT VOID                *Buffer
   );
 
+/* Latence/Windows AD104-style: disconnect TextOut / GraphicsConsole / NVIDIA
+ * GOP from the unlock GPU before Ada/Ampere PCIe FLR (primary display). */
+EFI_STATUS
+TuPciDisconnectDisplay (
+  IN EFI_HANDLE  GpuHandle
+  );
+
+/* After FLR (or skip_flr): ConnectController the GPU so NVIDIA GOP returns
+ * before StartImage. Mirrors TOTORONG AD103 Windows unlocker handoff. */
+EFI_STATUS
+TuPciReconnectDisplay (
+  IN EFI_HANDLE  GpuHandle
+  );
+
+/* Initiate PCIe Function Level Reset; requires DEVCAP.FLR, waits for TRPND
+ * clear and config space return. */
 EFI_STATUS
 TuPciFlr (
   IN EFI_PCI_IO_PROTOCOL  *PciIo
@@ -128,6 +144,9 @@ TuPciSaveConfig (
   OUT UINT8               Saved[256]
   );
 
+/* Post-FLR selective restore (Linux unlock_610 intent): BARs + COMMAND
+ * (MEMORY on / BME off from the pre-BME saved image), BAR/identity checks,
+ * DevSta TRPND clear. Refuses a blind 256-byte blast if identity mismatches. */
 EFI_STATUS
 TuPciRestoreConfig (
   IN EFI_PCI_IO_PROTOCOL  *PciIo,

@@ -41,12 +41,14 @@ TuAmpereIsDeviceId (
 
 INTN
 TuAmpereUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   )
 {
   (VOID)ImageHandle;
   (VOID)Gpu;
+  (VOID)Config;
   return -EOPNOTSUPP;
 }
 
@@ -63,14 +65,29 @@ TuAdaIsDeviceId (
   return FALSE;
 }
 
+BOOLEAN
+TuAdaAdmitUnlock (
+  IN UINT16           DeviceId,
+  IN CONST TU_CONFIG  *Config,
+  IN CONST CHAR8      *BdfName
+  )
+{
+  (VOID)DeviceId;
+  (VOID)Config;
+  (VOID)BdfName;
+  return FALSE;
+}
+
 INTN
 TuAdaUnlockGpu (
-  IN EFI_HANDLE  ImageHandle,
-  IN TU_PCI_GPU  *Gpu
+  IN EFI_HANDLE       ImageHandle,
+  IN TU_PCI_GPU       *Gpu,
+  IN CONST TU_CONFIG  *Config
   )
 {
   (VOID)ImageHandle;
   (VOID)Gpu;
+  (VOID)Config;
   return -EOPNOTSUPP;
 }
 
@@ -203,11 +220,29 @@ TuUnlockAll (
         );
       continue;
     }
+#if defined(TU_BUILD_ARCH_ADA)
+    if (Gpus[Index].Arch == TuArchAda) {
+      if (!TuAdaAdmitUnlock (Gpus[Index].DeviceId, Config, Name)) {
+        continue;
+      }
+    } else
+#endif
     if (!TargetListed (Config->Targets, Name)) {
       TuLogWide (L"Skipping %a (not in targets)\r\n", Name);
       continue;
     }
     if (!Gpus[Index].UnlockSupported) {
+      /* Ada experimental / unknown IDs must go through TuAdaAdmitUnlock; do
+       * not force-inject a readout-only Ada BAR onto AD102 assets. */
+      if (Gpus[Index].Arch == TuArchAda) {
+        TuLogWide (
+          L"Skipping %a 10de:%04x (Ada ID not admitted)\r\n",
+          Name,
+          Gpus[Index].DeviceId
+          );
+        GU_NOTE ("skip unadmitted Ada 10de:%04x\n", Gpus[Index].DeviceId);
+        continue;
+      }
       TuLogWide (
         L"FORCING inject on readout-only %a 10de:%04x\r\n",
         Name,
@@ -229,12 +264,12 @@ TuUnlockAll (
 #endif
 #if defined(TU_BUILD_ARCH_AMPERE)
       case TuArchAmpere:
-        Ret = TuAmpereUnlockGpu (ImageHandle, &Gpus[Index]);
+        Ret = TuAmpereUnlockGpu (ImageHandle, &Gpus[Index], Config);
         break;
 #endif
 #if defined(TU_BUILD_ARCH_ADA)
       case TuArchAda:
-        Ret = TuAdaUnlockGpu (ImageHandle, &Gpus[Index]);
+        Ret = TuAdaUnlockGpu (ImageHandle, &Gpus[Index], Config);
         break;
 #endif
       default:
