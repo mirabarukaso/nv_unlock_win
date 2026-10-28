@@ -11,6 +11,10 @@ This tree is a Windows UEFI port of three GPL-2.0-only Linux modules:
   Ampere  https://github.com/Zagitta/gpu-unlock
   Ada     https://github.com/JustAResearcher/gpu-unlock-ada
 
+Ada Windows handoff (0.2.12+) also follows the public path from
+https://huggingface.co/TOTORONG/AD103_win_unlocker (code GPL-2.0-only;
+new narrative docs CC BY-NC 4.0). This tree does not vendor that EFI.
+
 Keep the GPL-2.0-only notices on modified files. NVIDIA firmware blobs
 are not shipped here and remain under NVIDIA's license; see
 firmware/<arch>/NOTICE.md. Generators under firmware/turing, firmware/ampere,

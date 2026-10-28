@@ -1,13 +1,10 @@
 > [!IMPORTANT]
-> Secure Boot was off for both runs.
+> Secure Boot was off for these runs.
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
 > - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
-> - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Windows 10, driver 595.79. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked **RTX 4080** 0.2.12 MMA already exceeds the old published 4090 figures). Config support for base ID `2684` is unchanged.
->
-
-> [!NOTE]
-> **Ada / RTX 4080 verified on loader 0.2.12.** Friend-run Windows inject on `10de:2704`: `AD102 FEAT UNLOCKED`, then `mma_bench_sm89` about **2×** on `f16/f32` / `bf16/f32` / `fp8/e4m3` (control modes flat). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Unlock is session-only; turn **Fast Startup** off between inject tests. Per-card Ada flags (including stock **RTX 4090** `2684` and experimental **4090 D** `2685`), registry steps, and full MMA tables: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
+> - **RTX 4080** (AD103, `10de:2704`), Windows inject on loader **0.2.12** (friend-run). Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. `mma_bench_sm89` about **2×** on `f16/f32` / `bf16/f32` / `fp8/e4m3` (control modes flat). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Unlock is session-only; turn **Fast Startup** off between inject tests. Details: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
+> - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Config support for base ID `2684` is unchanged.
 
 [中文README](README_zh.md)
 
@@ -19,13 +16,14 @@ Version `0.2.12`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOT
 
 Most people stop after [Use](#use): download a release EFI, generate the matching firmware, copy both onto a USB stick. [Build from source](#build-from-source) is only for compiling the EFI yourself.
 
-Linux module sources this tree ports:
+Linux module sources this tree ports (Ada Windows handoff also credits TOTORONG):
 
 | Arch | Upstream | Release EFI |
 | --- | --- | --- |
 | Turing | https://github.com/nlzy/turing-unlock | `UnlockLoader-Turing.efi` |
 | Ampere | https://github.com/Zagitta/gpu-unlock | `UnlockLoader-Ampere.efi` |
 | Ada | https://github.com/JustAResearcher/gpu-unlock-ada | `UnlockLoader-Ada.efi` |
+| Ada (Windows handoff) | https://huggingface.co/TOTORONG/AD103_win_unlocker | — |
 
 ## Contents
 
@@ -250,12 +248,11 @@ Stock after the run: 309 W, SM 1935 MHz, 49 C. After inject: about 285–290 W, 
 
 Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Memory clock 9251 MHz on both.
 
-**RTX 4090** (`10de:2684`, AD102) — **needs re-verification.** Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`; Windows started. Earlier published Windows cuBLAS FP16 GEMM figures for this SKU are **withdrawn** pending a re-benchmark: unlocked **RTX 4080** 0.2.12 `mma_bench_sm89` already exceeds those old 4090 numbers. Base Ada config for `2684` is unchanged.
+**RTX 4080** (`10de:2704`, AD103), friend-run, Windows inject on loader **0.2.12**. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. `mma_bench_sm89` about **2×** on `f16/f32` / `bf16/f32` / `fp8/e4m3` (control modes flat). Full stock vs inject tables and ops notes: [docs/RTX40_Ada.md](docs/RTX40_Ada.md#mma-results-rtx-4080-0212). Do **not** treat cuBLAS FP16/BF16 GEMM alone as unlock proof on this SKU.
 
+**RTX 4090** (`10de:2684`, AD102) — **needs re-verification.** Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`; Windows started. Earlier published Windows cuBLAS FP16 GEMM figures for this SKU are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Base Ada config for `2684` is unchanged.
 
-**RTX 4080** (`10de:2704`): loader **0.2.12** inject verified with `mma_bench_sm89` (~2× on `f16/f32` / `bf16/f32` / `fp8/e4m3`). Full stock vs inject tables and ops notes are in [docs/RTX40_Ada.md](docs/RTX40_Ada.md#mma-results-rtx-4080-0212). Do **not** treat cuBLAS FP16/BF16 GEMM alone as unlock proof on this SKU.
-
-On Ada, register-resident issue-rate probes (such as `mma_bench_sm89`) and large cuBLAS GEMM can disagree a lot: GEMM often sits on the power limit. Prefer the issue-rate probe for unlock proof. Any older published **RTX 4090** Windows GEMM deltas in this tree are withdrawn (**needs re-verification**).
+On Ada, register-resident issue-rate probes (such as `mma_bench_sm89`) and large cuBLAS GEMM can disagree a lot: GEMM often sits on the power limit. Prefer the issue-rate probe for unlock proof.
 
 Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
 
