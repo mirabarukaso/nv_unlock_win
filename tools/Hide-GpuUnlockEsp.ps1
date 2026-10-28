@@ -30,8 +30,11 @@ foreach ($part in $parts) {
         Write-Host "Skip USB disk $($disk.Number) partition $($part.PartitionNumber)."
         continue
     }
-    $paths = @(Get-PartitionAccessPath -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -ErrorAction SilentlyContinue)
-    $letters = @($paths | Where-Object { $_ -match '^[A-Za-z]:\\$' })
+    $paths = @($part.AccessPaths)
+    if ($part.DriveLetter) {
+        $paths += ('{0}:\' -f $part.DriveLetter)
+    }
+    $letters = @($paths | Where-Object { $_ -match '^[A-Za-z]:\\$' } | Select-Object -Unique)
     if ($letters.Count -eq 0) {
         Write-Host "ESP disk $($disk.Number) partition $($part.PartitionNumber) has no drive letter."
         $hidden++
@@ -50,10 +53,7 @@ foreach ($part in $parts) {
         if (-not $PSCmdlet.ShouldProcess($target, 'remove the EFI system partition drive letter')) {
             continue
         }
-        & mountvol.exe "${letter}:" /D
-        if ($LASTEXITCODE -ne 0) {
-            throw "mountvol ${letter}: /D failed with exit $LASTEXITCODE."
-        }
+        Remove-PartitionAccessPath -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -AccessPath "${letter}:\"
         Write-Host "Removed ${letter}: from the EFI system partition."
         $removed++
     }
