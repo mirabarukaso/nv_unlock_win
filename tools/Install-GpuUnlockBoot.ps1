@@ -90,7 +90,7 @@ if (Test-Path -LiteralPath $fallback) {
 $config = @"
 default=$DefaultAction
 timeout_sec=$TimeoutSec
-verbose=1
+verbose=0
 targets=all
 "@
 [IO.File]::WriteAllText((Join-Path $Esp 'EFI\turing-unlock\config.ini'), $config, [Text.UTF8Encoding]::new($false))

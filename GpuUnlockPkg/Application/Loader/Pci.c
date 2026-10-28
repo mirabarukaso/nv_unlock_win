@@ -463,7 +463,7 @@ TuPciConnectInput (
   UINTN  TextInNow;
   UINTN  Wait;
 
-  TuPrint (L"Connecting USB input (fast POST)...\r\n");
+  TuLogWide (L"Connecting USB input (fast POST)...\r\n");
   GU_NOTE ("connect input: USB HC + ConIn\n");
 
   TextInBefore = CountProtocolHandles (&gEfiSimpleTextInProtocolGuid);
@@ -472,7 +472,7 @@ TuPciConnectInput (
     ConnectByProtocol (&gEfiPciRootBridgeIoProtocolGuid);
     UsbCount = ConnectUsbHostControllers ();
   }
-  TuPrint (L"USB host controllers: %u\r\n", UsbCount);
+  TuLogWide (L"USB host controllers: %u\r\n", UsbCount);
   GU_NOTE ("usb host controllers=%u textin=%u\n", UsbCount, TextInBefore);
 
   if (gST->ConsoleInHandle != NULL) {

@@ -239,7 +239,7 @@ function Write-UsbPayload([string]$Root) {
     $config = @"
 default=$DefaultAction
 timeout_sec=$TimeoutSec
-verbose=1
+verbose=0
 targets=all
 "@
     [IO.File]::WriteAllText((Join-Path $payloadDir 'config.ini'), $config, [Text.UTF8Encoding]::new($false))

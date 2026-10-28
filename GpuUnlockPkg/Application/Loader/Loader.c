@@ -33,7 +33,7 @@ UefiMain (
   (VOID)TuConfigParseLoadOptions (ImageHandle, &Config);
   TuLogInit (ImageHandle, Config.Verbose);
 
-  TuPrint (L"\r\nGPU Unlock Loader %a (%a)\r\n", TU_LOADER_VERSION, gTuLoaderMagic);
+  TuLogWide (L"\r\nGPU Unlock Loader %a (%a)\r\n", TU_LOADER_VERSION, gTuLoaderMagic);
   GU_NOTE ("loader start version=%a\n", TU_LOADER_VERSION);
 
   TuPciConnectInput ();
@@ -42,11 +42,11 @@ UefiMain (
   GpuCount = 0;
   Status   = TuPciScan (&Gpus, &GpuCount);
   if (EFI_ERROR (Status)) {
-    TuPrint (L"PCI scan failed %x, continuing with 0 GPUs\r\n", Status);
+    TuShow (L"PCI scan failed %x, continuing with 0 GPUs\r\n", Status);
     Gpus     = NULL;
     GpuCount = 0;
   }
-  TuPrint (L"NVIDIA display GPUs: %u\r\n", GpuCount);
+  TuLogWide (L"NVIDIA display GPUs: %u\r\n", GpuCount);
 
   Action = TuMenuChoose (&Config, Gpus, GpuCount);
   if (Action == TuActionInject) {
@@ -57,11 +57,11 @@ UefiMain (
     for (Index = 0; Index < GpuCount; Index++) {
       TuPciReadFeat (&Gpus[Index]);
     }
-    TuPrint (L"\r\nFeat AFTER inject:\r\n");
+    TuShow (L"\r\nFeat AFTER inject:\r\n");
     TuMenuPrintFeat (Gpus, GpuCount);
     TuMenuWaitContinue (TU_POST_INJECT_WAIT_SEC);
   } else {
-    TuPrint (L"Inject skipped. Continuing to boot.\r\n");
+    TuLogWide (L"Inject skipped. Continuing to boot.\r\n");
     GU_NOTE ("inject skipped by menu action=%u\n", (unsigned)Action);
   }
 
@@ -72,7 +72,7 @@ UefiMain (
     (Action == TuActionEmergency) ? "emergency" : "skip"
     );
   BootMode = TuBootModeDetect (ImageHandle);
-  TuPrint (
+  TuLogWide (
     L"Boot mode: %a\r\n",
     (BootMode == TuBootModeEsp) ? "esp" :
     (BootMode == TuBootModeUsb) ? "usb" : "unmarked"
@@ -88,7 +88,7 @@ UefiMain (
   if (Config.NoChainload) {
     UINTN Index;
 
-    TuPrint (L"--noload: not chainloading. Press any key.\r\n");
+    TuShow (L"--noload: not chainloading. Press any key.\r\n");
     gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
     gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
     return EFI_SUCCESS;
@@ -98,7 +98,7 @@ UefiMain (
   if (EFI_ERROR (Status)) {
     UINTN Index;
 
-    TuPrint (L"Press any key to return to firmware.\r\n");
+    TuShow (L"Press any key to return to firmware.\r\n");
     gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
     gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
   }

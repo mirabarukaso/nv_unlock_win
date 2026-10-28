@@ -13,7 +13,7 @@ TuConfigInitDefaults (
   ZeroMem (Config, sizeof (*Config));
   Config->DefaultAction = TuActionSkip;
   Config->TimeoutSec    = 20;
-  Config->Verbose       = TRUE;
+  Config->Verbose       = FALSE;
   AsciiStrCpyS (Config->Targets, sizeof (Config->Targets), "all");
 }
 

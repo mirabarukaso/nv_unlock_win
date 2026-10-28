@@ -101,6 +101,20 @@ TuPrint (
   ...
   );
 
+/* Screen and unlock.log. Use this for a one-shot result or error. */
+VOID
+TuShow (
+  IN CONST CHAR16  *Fmt,
+  ...
+  );
+
+/* File only. The menu redraw stays on TuPrint so it is not copied 20 times. */
+VOID
+TuLogWide (
+  IN CONST CHAR16  *Fmt,
+  ...
+  );
+
 #define GU_NOTE(fmt, ...)  TuLog ("turing_unlock: ", fmt, ##__VA_ARGS__)
 #define GU_ERROR(fmt, ...) TuLog ("turing_unlock ERROR: ", fmt, ##__VA_ARGS__)
 

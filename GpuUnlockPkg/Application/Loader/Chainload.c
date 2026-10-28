@@ -66,7 +66,7 @@ PrintStatus (
   IN EFI_STATUS    Status
   )
 {
-  TuPrint (L"  %s: %r (0x%lx)\r\n", What, Status, (UINT64)Status);
+  TuLogWide (L"  %s: %r (0x%lx)\r\n", What, Status, (UINT64)Status);
 }
 
 STATIC
@@ -79,12 +79,12 @@ PrintDp (
   CHAR16  *Text;
 
   if (Dp == NULL) {
-    TuPrint (L"  %s: <null>\r\n", Tag);
+    TuLogWide (L"  %s: <null>\r\n", Tag);
     return;
   }
   Text = ConvertDevicePathToText (Dp, FALSE, TRUE);
   if (Text != NULL) {
-    TuPrint (L"  %s: %s\r\n", Tag, Text);
+    TuLogWide (L"  %s: %s\r\n", Tag, Text);
     FreePool (Text);
   }
 }
@@ -241,7 +241,7 @@ ReadSignedBootmgr (
       continue;
     }
     if (!BufferLooksSigned (*Buffer, *Size)) {
-      TuPrint (
+      TuLogWide (
         L"  skip signed source %s (%u bytes, wrapper or too small)\r\n",
         mSignedSources[Index],
         *Size
@@ -274,17 +274,17 @@ RestoreOfficialBootmgr (
   IsWrapper    = TRUE;
   Status       = InspectFile (Device, TU_MS_BOOT_OFFICIAL, &OfficialSize, &IsWrapper);
   if (!EFI_ERROR (Status) && !IsWrapper) {
-    TuPrint (L"official bootmgfw.efi is already signed (%u bytes)\r\n", OfficialSize);
+    TuLogWide (L"official bootmgfw.efi is already signed (%u bytes)\r\n", OfficialSize);
     return EFI_SUCCESS;
   }
 
   Status = ReadSignedBootmgr (Device, &Buffer, &Size, &From);
   if (EFI_ERROR (Status)) {
-    TuPrint (L"no signed bootmgfw backup on this volume\r\n");
+    TuLogWide (L"no signed bootmgfw backup on this volume\r\n");
     return Status;
   }
 
-  TuPrint (L"restoring signed bootmgfw.efi from %s (%u bytes)\r\n", From, Size);
+  TuLogWide (L"restoring signed bootmgfw.efi from %s (%u bytes)\r\n", From, Size);
   Status = TuFsWriteDeviceFile (Device, TU_MS_BOOT_OFFICIAL, Buffer, Size, FALSE);
   if (EFI_ERROR (Status)) {
     PrintStatus (L"restore write", Status);
@@ -299,7 +299,7 @@ RestoreOfficialBootmgr (
     if (EFI_ERROR (Status)) {
       PrintStatus (L"restore bootx64", Status);
     } else {
-      TuPrint (L"also restored bootx64.efi\r\n");
+      TuLogWide (L"also restored bootx64.efi\r\n");
     }
   }
 
@@ -309,10 +309,10 @@ RestoreOfficialBootmgr (
   IsWrapper    = TRUE;
   Status       = InspectFile (Device, TU_MS_BOOT_OFFICIAL, &OfficialSize, &IsWrapper);
   if (EFI_ERROR (Status) || IsWrapper) {
-    TuPrint (L"restore verify failed: official path still looks like the wrapper\r\n");
+    TuShow (L"restore verify failed: official path still looks like the wrapper\r\n");
     return EFI_LOAD_ERROR;
   }
-  TuPrint (L"restore ok: %s (%u bytes)\r\n", TU_MS_BOOT_OFFICIAL, OfficialSize);
+  TuLogWide (L"restore ok: %s (%u bytes)\r\n", TU_MS_BOOT_OFFICIAL, OfficialSize);
   return EFI_SUCCESS;
 }
 
@@ -333,16 +333,16 @@ CandidateIsWrapper (
   Status = TuFsReadDeviceFile (Device, Path, &Buffer, &Size);
   if (EFI_ERROR (Status)) {
     if (Status != EFI_NOT_FOUND) {
-      TuPrint (L"candidate %s ", Path);
+      TuLogWide (L"candidate %s ", Path);
       PrintStatus (L"read", Status);
     }
     return TRUE;
   }
   Has = TuFsBufferHasMagic (Buffer, Size);
-  TuPrint (L"candidate %s (%u bytes)%s\r\n", Path, Size, Has ? L" [wrapper]" : L"");
+  TuLogWide (L"candidate %s (%u bytes)%s\r\n", Path, Size, Has ? L" [wrapper]" : L"");
   FreePool (Buffer);
   if (Has) {
-    TuPrint (L"  skip: this file is the wrapper itself\r\n");
+    TuLogWide (L"  skip: this file is the wrapper itself\r\n");
   }
   return Has;
 }
@@ -408,7 +408,7 @@ FixupWindowsImage (
     Child->DeviceHandle = Device;
   }
   PrintDp (L"child FilePath", Child->FilePath);
-  TuPrint (L"  child DeviceHandle %p\r\n", Child->DeviceHandle);
+  TuLogWide (L"  child DeviceHandle %p\r\n", Child->DeviceHandle);
 }
 
 STATIC
@@ -421,7 +421,7 @@ StartWindowsImage (
   CHAR16      *ExitData;
   UINTN       ExitSize;
 
-  TuPrint (L"Starting EFI loader...\r\n");
+  TuShow (L"Starting EFI loader...\r\n");
   ExitData = NULL;
   ExitSize = 0;
   Status   = gBS->StartImage (Image, &ExitSize, &ExitData);
@@ -509,8 +509,8 @@ TryDevice (
   if (!EFI_ERROR (Status) && IsWrapper) {
     Status = RestoreOfficialBootmgr (Device);
     if (EFI_ERROR (Status)) {
-      TuPrint (L"WARNING: could not put signed bootmgfw.efi back on the BCD path.\r\n");
-      TuPrint (L"Windows may show 0xc0000428 (unsigned wrapper still named bootmgfw.efi).\r\n");
+      TuShow (L"WARNING: could not put signed bootmgfw.efi back on the BCD path.\r\n");
+      TuShow (L"Windows may show 0xc0000428 (unsigned wrapper still named bootmgfw.efi).\r\n");
     }
   }
 
@@ -1024,8 +1024,8 @@ CollectTargets (
   *OutList   = NULL;
   *Count     = 0;
   *Truncated = FALSE;
-  TuPrint (L"Scanning NVMe and SATA FAT volumes for EFI loaders\r\n");
-  TuPrint (L"mass storage controllers connected: %u\r\n", TuPciConnectMassStorage ());
+  TuShow (L"Looking for EFI loaders...\r\n");
+  TuLogWide (L"mass storage controllers connected: %u\r\n", TuPciConnectMassStorage ());
   Status = gBS->LocateHandleBuffer (
                   ByProtocol,
                   &gEfiSimpleFileSystemProtocolGuid,
@@ -1054,6 +1054,45 @@ CollectTargets (
 }
 
 STATIC
+VOID
+DrawBootRow (
+  IN BOOLEAN       Selected,
+  IN UINTN         NormalAttr,
+  IN CONST CHAR16  *Text
+  )
+{
+  if (Selected) {
+    gST->ConOut->SetAttribute (gST->ConOut, EFI_WHITE | EFI_BACKGROUND_BLUE);
+    TuPrint (L" > %s\r\n", Text);
+  } else {
+    gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
+    TuPrint (L"   %s\r\n", Text);
+  }
+  gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
+}
+
+STATIC
+VOID
+DrawBootList (
+  IN CONST TU_BOOT_TARGET  *List,
+  IN UINTN                 Count,
+  IN UINTN                 Selected,
+  IN UINTN                 NormalAttr
+  )
+{
+  UINTN  Index;
+
+  gST->ConOut->ClearScreen (gST->ConOut);
+  gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
+  TuPrint (L"Select a boot target\r\n");
+  TuPrint (L"Up/Down, Enter to start, Esc for firmware\r\n\r\n");
+  for (Index = 0; Index < Count; Index++) {
+    DrawBootRow (Index == Selected, NormalAttr, List[Index].Title);
+  }
+  TuPrint (L"\r\n%s\r\n%s\r\n", List[Selected].Path, List[Selected].Where);
+}
+
+STATIC
 INTN
 PickTarget (
   IN CONST TU_BOOT_TARGET  *List,
@@ -1063,32 +1102,25 @@ PickTarget (
   EFI_INPUT_KEY  Key;
   EFI_STATUS     Status;
   UINTN          Index;
-  CHAR16         Acc[4];
-  UINTN          AccLen;
+  UINTN          Selected;
+  UINTN          NormalAttr;
 
-  TuPrint (L"\r\nBoot targets on NVMe and SATA:\r\n\r\n");
-  for (Index = 0; Index < Count; Index++) {
-    TuPrint (L"  [%u]  %s\r\n", Index + 1, List[Index].Title);
-    TuPrint (L"       %s\r\n", List[Index].Path);
-    TuPrint (L"       %s\r\n", List[Index].Where);
+  if (Count == 0) {
+    return -1;
   }
-  TuPrint (L"\r\nType a number and press Enter.");
-  if (Count == 1) {
-    TuPrint (L" Enter alone starts the only target.");
+  Selected   = 0;
+  NormalAttr = gST->ConOut->Mode->Attribute;
+  if (NormalAttr == 0) {
+    NormalAttr = EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK;
   }
-  TuPrint (L"\r\nEsc returns to firmware.\r\n");
-
-  AccLen = 0;
-  Acc[0] = 0;
   while (!EFI_ERROR (gST->ConIn->ReadKeyStroke (gST->ConIn, &Key))) {
   }
   for (;;) {
-    UINTN  Value;
-    UINTN  Digit;
-
+    DrawBootList (List, Count, Selected, NormalAttr);
     Index  = 0;
     Status = gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index);
     if (EFI_ERROR (Status)) {
+      gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
       return -1;
     }
     Status = gST->ConIn->ReadKeyStroke (gST->ConIn, &Key);
@@ -1096,38 +1128,17 @@ PickTarget (
       continue;
     }
     if (Key.ScanCode == SCAN_ESC) {
+      gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
       return -1;
     }
     if ((Key.UnicodeChar == CHAR_CARRIAGE_RETURN) || (Key.UnicodeChar == CHAR_LINEFEED)) {
-      if (AccLen == 0) {
-        if (Count == 1) {
-          return 0;
-        }
-        TuPrint (L"Type the number of a target.\r\n");
-        continue;
-      }
-      Value = 0;
-      for (Digit = 0; Digit < AccLen; Digit++) {
-        Value = (Value * 10) + (UINTN)(Acc[Digit] - L'0');
-      }
-      if ((Value >= 1) && (Value <= Count)) {
-        return (INTN)(Value - 1);
-      }
-      TuPrint (L"No target %u. Type a number from 1 to %u.\r\n", Value, Count);
-      AccLen = 0;
-      Acc[0] = 0;
-      continue;
+      gST->ConOut->SetAttribute (gST->ConOut, NormalAttr);
+      return (INTN)Selected;
     }
-    if ((Key.UnicodeChar == CHAR_BACKSPACE) && (AccLen > 0)) {
-      AccLen--;
-      Acc[AccLen] = 0;
-      TuPrint (L"\b \b");
-      continue;
-    }
-    if ((Key.UnicodeChar >= L'0') && (Key.UnicodeChar <= L'9') && (AccLen + 1 < ARRAY_SIZE (Acc))) {
-      Acc[AccLen++] = Key.UnicodeChar;
-      Acc[AccLen]   = 0;
-      TuPrint (L"%c", Key.UnicodeChar);
+    if (Key.ScanCode == SCAN_UP) {
+      Selected = (Selected == 0) ? (Count - 1) : (Selected - 1);
+    } else if (Key.ScanCode == SCAN_DOWN) {
+      Selected = (Selected + 1) % Count;
     }
   }
 }
@@ -1154,11 +1165,11 @@ ChainloadFromDiskList (
     return Status;
   }
   if (Truncated) {
-    TuPrint (L"Boot list stopped at %u entries.\r\n", TU_BOOT_TARGET_MAX);
+    TuLogWide (L"Boot list stopped at %u entries.\r\n", TU_BOOT_TARGET_MAX);
   }
   TuLogFlush ();
   if (Count == 0) {
-    TuPrint (L"No bootable EFI loader found on NVMe or SATA FAT partitions.\r\n");
+    TuShow (L"No bootable EFI loader found on NVMe or SATA FAT partitions.\r\n");
     FreePool (List);
     return EFI_NOT_FOUND;
   }
@@ -1166,7 +1177,7 @@ ChainloadFromDiskList (
   if (Pick < 0) {
     GU_NOTE ("boot choice=esc\n");
     TuLogFlush ();
-    TuPrint (L"\r\nNo target selected.\r\n");
+    TuShow (L"\r\nNo target selected.\r\n");
     FreePool (List);
     return EFI_ABORTED;
   }
@@ -1226,7 +1237,7 @@ TuChainloadWindows (
     SelfPath = Loaded->FilePath;
   }
   PrintDp (L"self path", SelfPath);
-  TuPrint (L"chainload from device %p\r\n", Loaded->DeviceHandle);
+  TuLogWide (L"chainload from device %p\r\n", Loaded->DeviceHandle);
 
   if (Mode != TuBootModeUsb) {
     /* ESP restores signed bootmgfw on this volume, then starts it.
@@ -1238,11 +1249,11 @@ TuChainloadWindows (
       return Status;
     }
     if (Mode == TuBootModeEsp) {
-      TuPrint (L"chainload FAILED: could not LoadImage/StartImage Windows Boot Manager.\r\n");
-      TuPrint (L"From recovery: copy EFI\\turing-unlock\\bootmgfw_ms.efi over EFI\\Microsoft\\Boot\\bootmgfw.efi\r\n");
+      TuShow (L"chainload FAILED: could not LoadImage/StartImage Windows Boot Manager.\r\n");
+      TuShow (L"From recovery: copy EFI\\turing-unlock\\bootmgfw_ms.efi over EFI\\Microsoft\\Boot\\bootmgfw.efi\r\n");
       return EFI_NOT_FOUND;
     }
-    TuPrint (L"This volume has no boot loader.\r\n");
+    TuLogWide (L"This volume has no boot loader.\r\n");
   }
 
   /* Mass storage only. A full PCI connect rebinds the NVIDIA GOP.
@@ -1252,6 +1263,6 @@ TuChainloadWindows (
   if (!EFI_ERROR (Status) || (Status == EFI_ABORTED)) {
     return Status;
   }
-  TuPrint (L"chainload FAILED: could not start a selected EFI loader.\r\n");
+  TuShow (L"chainload FAILED: could not start a selected EFI loader.\r\n");
   return Status;
 }

@@ -179,7 +179,7 @@ TuUnlockAll (
   CHAR8  Name[32];
 
   if (GpuCount == 0) {
-    TuPrint (L"Inject: no supported GPU. No MMIO writes.\r\n");
+    TuShow (L"Inject: no supported GPU. No MMIO writes.\r\n");
     GU_NOTE ("inject skipped: gpu_count=0\n");
     return EFI_SUCCESS;
   }
@@ -196,7 +196,7 @@ TuUnlockAll (
       (UINT32)Gpus[Index].Function
       );
     if (!TuArchMatchesBuild (Gpus[Index].Arch)) {
-      TuPrint (
+      TuLogWide (
         L"Skipping %a: this loader was built for %a only\r\n",
         Name,
         TU_BUILD_ARCH_NAME
@@ -204,18 +204,18 @@ TuUnlockAll (
       continue;
     }
     if (!TargetListed (Config->Targets, Name)) {
-      TuPrint (L"Skipping %a (not in targets)\r\n", Name);
+      TuLogWide (L"Skipping %a (not in targets)\r\n", Name);
       continue;
     }
     if (!Gpus[Index].UnlockSupported) {
-      TuPrint (
+      TuLogWide (
         L"FORCING inject on readout-only %a 10de:%04x\r\n",
         Name,
         Gpus[Index].DeviceId
         );
       GU_NOTE ("force inject 10de:%04x\n", Gpus[Index].DeviceId);
     }
-    TuPrint (
+    TuLogWide (
       L"Unlocking %a 10de:%04x (%s)\r\n",
       Name,
       Gpus[Index].DeviceId,
@@ -238,7 +238,7 @@ TuUnlockAll (
         break;
 #endif
       default:
-        TuPrint (
+        TuLogWide (
           L"Skipping %a: this loader was built for %a only\r\n",
           Name,
           TU_BUILD_ARCH_NAME
@@ -247,12 +247,12 @@ TuUnlockAll (
     }
     GU_NOTE ("unlock 10de:%04x result=%d\n", Gpus[Index].DeviceId, (int)Ret);
     if (Ret) {
-      TuPrint (L"Unlock failed (%d)\r\n", Ret);
+      TuShow (L"Unlock failed (%d)\r\n", Ret);
       if (!Failed) {
         Failed = Ret;
       }
     } else {
-      TuPrint (L"Unlock completed.\r\n");
+      TuShow (L"Unlock completed.\r\n");
     }
   }
   if (Failed) {

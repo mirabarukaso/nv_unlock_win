@@ -350,6 +350,25 @@ TuLog (
   TuEmitAscii (Line);
 }
 
+STATIC
+VOID
+TuAppendWideAsAscii (
+  IN CONST CHAR16  *Wide
+  )
+{
+  CHAR8  Ascii[512];
+  UINTN  Index;
+
+  if (Wide == NULL) {
+    return;
+  }
+  for (Index = 0; (Index + 1 < sizeof (Ascii)) && (Wide[Index] != 0); Index++) {
+    Ascii[Index] = (Wide[Index] < 128) ? (CHAR8)Wide[Index] : '?';
+  }
+  Ascii[Index] = 0;
+  TuLogAppend (Ascii);
+}
+
 VOID
 TuPrint (
   IN CONST CHAR16  *Fmt,
@@ -365,4 +384,37 @@ TuPrint (
   if (gST != NULL && gST->ConOut != NULL) {
     gST->ConOut->OutputString (gST->ConOut, Line);
   }
+}
+
+VOID
+TuShow (
+  IN CONST CHAR16  *Fmt,
+  ...
+  )
+{
+  VA_LIST  Args;
+  CHAR16   Line[512];
+
+  VA_START (Args, Fmt);
+  UnicodeVSPrint (Line, sizeof (Line), Fmt, Args);
+  VA_END (Args);
+  if (gST != NULL && gST->ConOut != NULL) {
+    gST->ConOut->OutputString (gST->ConOut, Line);
+  }
+  TuAppendWideAsAscii (Line);
+}
+
+VOID
+TuLogWide (
+  IN CONST CHAR16  *Fmt,
+  ...
+  )
+{
+  VA_LIST  Args;
+  CHAR16   Wide[512];
+
+  VA_START (Args, Fmt);
+  UnicodeVSPrint (Wide, sizeof (Wide), Fmt, Args);
+  VA_END (Args);
+  TuAppendWideAsAscii (Wide);
 }

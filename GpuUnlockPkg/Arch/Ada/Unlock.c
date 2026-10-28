@@ -1284,7 +1284,7 @@ TuAdaUnlockGpu (
 
   if (Gpu->DeviceId != GU_AD102_RTX_4090) {
     GU_NOTE ("experimental Ada PCI ID %#x using AD102-family assets\n", Gpu->DeviceId);
-    TuPrint (L"Experimental Ada ID 10de:%04x; AD102-family payload.\r\n", Gpu->DeviceId);
+    TuLogWide (L"Experimental Ada ID 10de:%04x; AD102-family payload.\r\n", Gpu->DeviceId);
   }
 
   ret = load_fw (w, BOOTER_FILE, &w->BooterFw);
