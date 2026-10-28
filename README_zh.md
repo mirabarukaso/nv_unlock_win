@@ -2,7 +2,8 @@
 > 两次测试都关闭了 Secure Boot。
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
-> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16→FP32 GEMM 从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 4090**（AD102，`10de:2684`），Windows 10，驱动 595.79。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM（FP32 累加）从 135.9 升到 156.3 TFLOPS（+15%）。1024 和 2048 没有变化。
 >
 
 # GPU Unlock UEFI loader (Windows)
@@ -193,11 +194,14 @@ bcdboot C:\Windows /s S: /f UEFI
 
 ### 实测结果
 
-脚本：[`bench/gemm_fp16.py`](bench/gemm_fp16.py)。PyTorch → cuBLAS，FP16 输入，tensor core，内部 FP32 累加。尺寸 1024 / 2048 / 4096 / 8192。
+两个脚本，尺寸都是 1024 / 2048 / 4096 / 8192。PyTorch 调用 cuBLAS。输入是 FP16 或 BF16，tensor core 做乘法，点积在内部用 FP32 累加。结果矩阵仍是输入的类型。`FP16→FP32` 指的是这条累加，不是把结果存成 FP32。
+
+30 系和 40 系建议两个都跑：Skip 一次，注入后再一次，比较这张卡自己的 TFLOPS。Turing 没有 BF16 tensor core，20 系只跑 FP16 脚本。
 
 ```powershell
 pip install torch
 python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
+python .\bench\gemm_bf16.py --sizes 1024,2048,4096,8192 --repeat 80
 ```
 
 **TITAN RTX**（`10de:1e02`，完整 72 SM TU102），2026-10-25，Windows 10，驱动 617.42，PyTorch 2.9.0+cu130，CUDA 13.0，功耗墙 320 W。Loader `TU102 FEAT UNLOCKED`，`PLM=FFFFFFFF SS0=88888888 SS1=00000008`。表内是中位数 TFLOPS。2080 Ti 两列来自 Turing 的 Linux README（Dell RTX 2080 Ti 22GB @250W），不是本树测的。那两列的 100% 峰值是 56.9 TFLOPS。
@@ -222,7 +226,18 @@ python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
 
 Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W。两边显存时钟都是 9251 MHz。
 
-GeForce 2080 Ti 和 Ada 上的注入尚未在本树验证。Tensor core 满速功耗很高，可能损坏硬件。
+**RTX 4090**（`10de:2684`，AD102），2026-10-28，Windows 10，驱动 595.79，PyTorch 2.11.0+cu130，CUDA 13.0，功耗墙 450 W。Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`。Windows 正常启动，设备错误码 0。前后各三轮，表内是中位数。1024 和 2048 没有变化。8192 注入后的每一轮都高于基线的每一轮。
+
+| M.N.K | skip | 注入后 | 变化 |
+| ---: | ---: | ---: | ---: |
+| 1024 | 104.9 | 104.9 | 0% |
+| 2048 | 164.5 | 164.5 | 0% |
+| 4096 | 155.9 | 151.6 | −2.8% |
+| 8192 | 135.9 | 156.3 | +15% |
+
+Linux 上的 Ada 报告把两种测量分开。4090 上寄存器驻留的 FP16/FP32 指令发射率大约是 2 倍（约 165 到 330 TFLOPS）。同一类卡上的 cuBLAS GEMM 小得多，按尺寸大约 12–34%，一次持续负载的 Windows 8192³ BF16 GEMM 大约 +5%。卡顶在功耗墙上，GEMM 到不了发射率的倍数。这次 UEFI 的 FP16 GEMM 和那个幅度一致。这张卡的 BF16 GEMM 还没有测。
+
+GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很高，可能损坏硬件。
 
 ### 使用时排障
 
@@ -446,6 +461,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
   assets/config.ini
   assets/firmware/<Arch>/  生成的 blob（gitignore）
   bench/gemm_fp16.py
+  bench/gemm_bf16.py
   build/                   UnlockLoader-<Arch>.efi（gitignore）
   nasm-3.02/               本地下载，不入库
   edk2/                    本地下载，不入库

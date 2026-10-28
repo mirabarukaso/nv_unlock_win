@@ -2,7 +2,8 @@
 > Secure Boot was off for both runs.
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
-> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16→FP32 GEMM at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 4090** (AD102, `10de:2684`), Windows 10, driver 595.79. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM (FP32 accumulate) at 8192 rose from 135.9 to 156.3 TFLOPS (+15%). 1024 and 2048 stayed flat.
 >
 
 [中文README](README_zh.md)
@@ -193,11 +194,14 @@ bcdboot C:\Windows /s S: /f UEFI
 
 ### Measured results
 
-Script: [`bench/gemm_fp16.py`](bench/gemm_fp16.py). PyTorch → cuBLAS, FP16 inputs, tensor cores, FP32 accumulate. Sizes 1024 / 2048 / 4096 / 8192.
+Two scripts, same sizes (1024 / 2048 / 4096 / 8192). PyTorch calls cuBLAS. The inputs are FP16 or BF16, tensor cores do the multiply, and the dot product accumulates in FP32. The output matrix stays in the input type. `FP16→FP32` means that accumulation, not an FP32 result buffer.
+
+30-series and 40-series cards should run both, once on Skip and once after Inject. Compare TFLOPS on that same card. Turing has no BF16 tensor cores, so a 20-series GPU only runs the FP16 script.
 
 ```powershell
 pip install torch
 python .\bench\gemm_fp16.py --sizes 1024,2048,4096,8192 --repeat 80
+python .\bench\gemm_bf16.py --sizes 1024,2048,4096,8192 --repeat 80
 ```
 
 **TITAN RTX** (`10de:1e02`, full 72-SM TU102), 2026-10-25, Windows 10, driver 617.42, PyTorch 2.9.0+cu130, CUDA 13.0, power limit 320 W. Loader `TU102 FEAT UNLOCKED`, `PLM=FFFFFFFF SS0=88888888 SS1=00000008`. Values are median TFLOPS. The 2080 Ti columns are from the Turing Linux README (Dell RTX 2080 Ti 22GB @250W), not from this tree. 100% peak in those columns is 56.9 TFLOPS.
@@ -222,7 +226,18 @@ Stock after the run: 309 W, SM 1935 MHz, 49 C. After inject: about 285–290 W, 
 
 Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Memory clock 9251 MHz on both.
 
-Inject on a GeForce 2080 Ti or on Ada is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
+**RTX 4090** (`10de:2684`, AD102), 2026-10-28, Windows 10, driver 595.79, PyTorch 2.11.0+cu130, CUDA 13.0, 450 W cap. Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`. Windows started with device error code 0. Three rounds each; the table is the median. 1024 and 2048 did not move. Every 8192 round after inject was above every baseline round.
+
+| M.N.K | skip | after inject | change |
+| ---: | ---: | ---: | ---: |
+| 1024 | 104.9 | 104.9 | 0% |
+| 2048 | 164.5 | 164.5 | 0% |
+| 4096 | 155.9 | 151.6 | −2.8% |
+| 8192 | 135.9 | 156.3 | +15% |
+
+The Linux Ada reports separate two measurements. Register-resident FP16/FP32 issue rate on a 4090 is about 2× (around 165 to 330 TFLOPS). cuBLAS GEMM on the same cards moves much less, about 12–34% depending on shape, and a sustained Windows run of 8192³ BF16 GEMM was about +5%. The card sits on its power limit, so the GEMM does not reach the issue-rate ratio. This UEFI run matches that GEMM pattern. This card's BF16 GEMM was not measured.
+
+Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
 
 ### Runtime troubleshooting
 
@@ -446,6 +461,7 @@ With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
   assets/config.ini
   assets/firmware/<Arch>/  generated blobs (gitignored)
   bench/gemm_fp16.py
+  bench/gemm_bf16.py
   build/                   UnlockLoader-<Arch>.efi (gitignored)
   nasm-3.02/               local download, not in git
   edk2/                    local download, not in git

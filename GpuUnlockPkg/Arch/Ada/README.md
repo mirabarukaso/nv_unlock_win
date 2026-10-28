@@ -16,7 +16,7 @@ this UEFI loader. Compile it alone:
 
 | ID | Card | Status |
 | --- | --- | --- |
-| `10de:2684` | RTX 4090 | admitted |
+| `10de:2684` | RTX 4090 | UEFI inject wrote SS, Windows started, FP16 GEMM at 8192 rose 135.9 → 156.3 |
 | `10de:2685` | RTX 4090 D | experimental, same AD102 assets |
 | `10de:2705` | RTX 4070 Ti SUPER (AD103) | experimental canary |
 | `10de:2805` | RTX 4060 Ti 16GB (AD106) | experimental, untested on silicon |
