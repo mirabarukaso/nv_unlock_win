@@ -12,7 +12,7 @@
 
 Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，可选解锁 GPU，再启动内部磁盘上的 Windows、GRUB、systemd-boot 或其它 x64 EFI 加载器。U 盘不改内部 EFI 系统分区（ESP），固件启动菜单仍然可以启动已经装在那里的系统。
 
-版本 `0.2.12`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
+版本 `0.2.13`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
 
 多数人看到 [使用](#使用) 即可：下载 release 里的 EFI，生成对应 firmware，拷到 U 盘。[从头编译](#从头编译) 只在你要自己编 EFI 时才需要。
 
@@ -128,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\New-GpuUnlockUsb.ps1 -DriveLett
 ### 启动菜单
 
 ```
-GPU Unlock Loader 0.2.12 (Turing)
+GPU Unlock Loader 0.2.13 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -169,6 +169,36 @@ NVMe ns=1 part=1
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 ```
+
+### 支持的显卡
+
+按代码里的 ID 列表整理（`Arch/Turing/TuringIds.c`、`Arch/Ampere/Ampere.c`、`Arch/Ada/arch.h` + `Ada.c`），卡名以 [pci.ids](https://pci-ids.ucw.cz/read/PC/10de) 为准。
+
+| 系列 | 芯片 | 代码中的 PCI ID（`10de:`） | 显卡 | 状态 |
+| --- | --- | --- | --- | --- |
+| 20 | TU102 | `1e02`（不在列表，按范围匹配） | TITAN RTX | **已验证（本仓库）**：强制注入成功，无提升（出厂满血） |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **上游已验证**（nlzy，Dell 2080 Ti） |
+| 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / 工程样品 | 在列表，未测试 |
+| 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | 在列表，未测试 |
+| 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | 在列表，未测试 |
+| 20 | 其他 TU10x/TU11x | `1e00-1fff` 中未列出的 | — | 仍允许按范围强制注入（老卡，暂无不良反馈） |
+| 30 | GA102 | `2200 2203 2204 2205 2206 2207 2208 220a 220d 2216 222b 222f` | RTX 3090 Ti / 3090 / 3080 Ti / 3080 / 3080 12GB / 3070 Ti（GA102）/ CMP 90HX / 工程样品；`2200` 无名称 | 在列表，未测试 |
+| 30 | GA104 | `2482` | RTX 3070 Ti | **已验证（本仓库）**：FP16 GEMM +78% |
+| 30 | GA104 | `2480 2483 2484 2486 2487 2488 2489 248a 248c 248d 248e 249c 249d 249f 24a0 24a4 24ac 24ad 24af 24bf 24c0 24c7 24c8 24c9 24dc 24dd 24df 24e0` | RTX 3070 / 3060 Ti / 3060（GA104）/ LHR / CMP 70HX / 3080~3070 Ti 笔记本 / 工程样品；`2480 2483 249f 24a4 24c0 24df` 无名称或为开发 ID | 在列表，未测试 |
+| 30 | GA103 | `2414` | RTX 3060 Ti（GA103） | 在列表，未测试 |
+| 30 | GA106 | `2504` | RTX 3060 LHR（12GB） | **上游已验证**（Zagitta） |
+| 30 | GA106 | `2501 2503 2505 2509 252f 2544` | RTX 3060 / 3060 12GB Rev. 2 / 工程样品；`2505` 无名称 | 在列表，未测试 |
+| 30 | GA106 | `2507 2508` | **RTX 3050 / 3050 OEM** | **不支持**（0.2.13 起跳过） |
+| 30 | GA107 / 笔记本 | 不在列表（`2582-25ec`、`2523 2563` 等） | **RTX 3050** 台式 / 笔记本 | **不支持**：未列出的 Ampere ID 一律跳过 |
+| 40 | AD102 | `2684` | RTX 4090 | 基线 ID，可用 `targets=all`。启动/注入正常；**性能需重新验证** |
+| 40 | AD102 | `2685` | RTX 4090 D | `rtx4090d_experimental=1`，未测试 |
+| 40 | AD103 | `2704` | RTX 4080 | `rtx4080_experimental=1` + 精确 BDF。**已验证（本仓库，0.2.12）** |
+| 40 | AD103 | `2702` | RTX 4080 SUPER | `ad103_experimental=1` + 精确 BDF，未测试 |
+| 40 | AD103 | `2705` | RTX 4070 Ti SUPER | `ad103_experimental=1` + 精确 BDF，未测试 |
+| 40 | AD106 | `2805` | RTX 4060 Ti 16GB | `ad106_experimental=1` + 精确 BDF，未测试 |
+| 40 | AD107 | 不在列表（`28a1 28e1` 等） | **RTX 4050** 笔记本 | **不支持**：Ada 准入直接拒绝 |
+
+**RTX 3050 和 RTX 4050 不支持。** Ampere/Ada 上不在本表的 ID 会记录日志后跳过；只有 Turing 仍按范围强制注入。
 
 ### Ada / RTX 40 系
 
@@ -262,7 +292,7 @@ GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很�
 | --- | --- |
 | 启动菜单里没有这块 U 盘，或看不到 loader 菜单 | Secure Boot 仍开着，或固件启动菜单没有选这块 U 盘 |
 | `firmware missing` / `load_fw error=-2` | 生成该架构的 blob，再跑一次 `New-GpuUnlockUsb.ps1` |
-| 菜单不是 `0.2.12 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
+| 菜单不是 `0.2.13 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
 | 菜单里键盘没反应 | 0.2.3 及以后会在进菜单前连接 USB。用当前 EFI 重写 U 盘 |
 | RTX 3070 Ti 注入后一直黑屏 | 等大约 1 分钟。实测启动就是这样，然后进入了 Windows |
 | 列表里没有内部磁盘 | 固件没有在 NVMe 或 SATA 上挂出 FAT EFI 分区，或那里唯一的加载器就是这份未签名包装器 |
@@ -404,7 +434,7 @@ Prepare 检查 Windows x64、VS2022 C++（17.x）、Python 3.6+、NASM 2.15.05+�
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.12`）。
+`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.13`）。
 
 Ada 用 AD102 的 Linux 事务（four-PLM V67，然后 FLR）。Ampere 用 GA102 的 Linux 事务（V67、选择器，然后 FLR）。Turing 写选择器，不做 FLR。
 
@@ -446,7 +476,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
 2. 关机。设置 → 安全 → 取消 **启用安全启动**。
 3. 把 `build\UnlockLoader-Turing.efi` 和 `tools\` 拷进虚拟机。
 4. 在虚拟机里用管理员 PowerShell 跑 ESP 安装。
-5. 重启。菜单应显示 `GPU Unlock Loader 0.2.12 (Turing)`。回车或超时后应进入 Windows。
+5. 重启。菜单应显示 `GPU Unlock Loader 0.2.13 (Turing)`。回车或超时后应进入 Windows。
 
 没有直通 GPU 时，Inject 打印 `gpu_count=0`，不写 MMIO。
 
@@ -484,7 +514,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
   edk2/                    本地下载，不入库
   LICENSE                  GPL-2.0-only
   NOTICE                   署名
-  VERSION                  0.2.12
+  VERSION                  0.2.13
   README.md                英文
   README_zh.md             中文
 ```
@@ -500,6 +530,8 @@ NVIDIA firmware 仍受 NVIDIA 许可约束，不在 git 里。
 ---
 
 ## 更新记录
+
+`0.2.13`：Ampere 不再对只按 `0x2200-0x25ff` 范围匹配到的 ID 强制注入（GA107 / 笔记本 RTX 3050 等未列出型号记录日志后跳过）。RTX 3050 GA106（`2507`/`2508`）同样跳过。RTX 4050（AD107）仍由 Ada 准入拒绝。Turing 的范围强制注入不变。README 新增按代码 ID 列表整理的 20/30/40 系支持表。
 
 `0.2.12` 按 TOTORONG AD103 Windows unlocker 调整 handoff：Inject 前尽量 LoadImage（preload）`bootmgfw`；保留 FLR 前 `driver_release`；FLR 后 `ConnectController` 重连 GOP，再观察选择器，最后 StartImage 预加载镜像（失败则回退到原来的 LoadImage 路径）。Ada/Ampere 成功路径均写 `post-GOP-reconnect` 日志。解锁 payload 未改。
 

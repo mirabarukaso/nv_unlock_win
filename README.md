@@ -12,7 +12,7 @@
 
 Unsigned EFI loader for Turing, Ampere, and Ada. Boot it from a FAT32 USB stick, optionally unlock the GPU, then start Windows, GRUB, systemd-boot, or another x64 EFI loader on an internal disk. The stick does not modify the internal EFI system partition (ESP), so the firmware boot menu can still start the systems already installed there.
 
-Version `0.2.12`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
+Version `0.2.13`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
 
 Most people stop after [Use](#use): download a release EFI, generate the matching firmware, copy both onto a USB stick. [Build from source](#build-from-source) is only for compiling the EFI yourself.
 
@@ -128,7 +128,7 @@ In the firmware boot menu, boot the stick. Secure Boot stays off.
 ### Boot menu
 
 ```
-GPU Unlock Loader 0.2.12 (Turing)
+GPU Unlock Loader 0.2.13 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -169,6 +169,36 @@ If Explorer is showing the internal EFI system partition, elevated PowerShell re
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 ```
+
+### Supported GPUs
+
+Built from the ID lists in code (`Arch/Turing/TuringIds.c`, `Arch/Ampere/Ampere.c`, `Arch/Ada/arch.h` + `Ada.c`). Names from [pci.ids](https://pci-ids.ucw.cz/read/PC/10de).
+
+| Series | Chip | PCI IDs in code (`10de:`) | Cards | Status |
+| --- | --- | --- | --- | --- |
+| 20 | TU102 | `1e02` (not listed, range match) | TITAN RTX | **Verified (ours)**: force-inject works, no gain (factory full) |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **Verified upstream** (nlzy, Dell 2080 Ti) |
+| 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / engineering samples | Listed, untested |
+| 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | Listed, untested |
+| 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | Listed, untested |
+| 20 | other TU10x/TU11x | any `1e00-1fff` not listed | — | Range force-inject still allowed (old parts, no reported harm) |
+| 30 | GA102 | `2200 2203 2204 2205 2206 2207 2208 220a 220d 2216 222b 222f` | RTX 3090 Ti / 3090 / 3080 Ti / 3080 / 3080 12GB / 3070 Ti (GA102) / CMP 90HX / ES; `2200` unnamed | Listed, untested |
+| 30 | GA104 | `2482` | RTX 3070 Ti | **Verified (ours)**: FP16 GEMM +78% |
+| 30 | GA104 | `2480 2483 2484 2486 2487 2488 2489 248a 248c 248d 248e 249c 249d 249f 24a0 24a4 24ac 24ad 24af 24bf 24c0 24c7 24c8 24c9 24dc 24dd 24df 24e0` | RTX 3070 / 3060 Ti / 3060 (GA104) / LHR / CMP 70HX / 3080-3070 Ti laptop / ES; `2480 2483 249f 24a4 24c0 24df` unnamed or dev IDs | Listed, untested |
+| 30 | GA103 | `2414` | RTX 3060 Ti (GA103) | Listed, untested |
+| 30 | GA106 | `2504` | RTX 3060 LHR (12GB) | **Verified upstream** (Zagitta) |
+| 30 | GA106 | `2501 2503 2505 2509 252f 2544` | RTX 3060 / 3060 12GB Rev. 2 / ES; `2505` unnamed | Listed, untested |
+| 30 | GA106 | `2507 2508` | **RTX 3050 / 3050 OEM** | **Not supported** (skipped in 0.2.13) |
+| 30 | GA107 / laptop | not listed (`2582-25ec`, `2523 2563` …) | **RTX 3050** desktop / laptop | **Not supported**: unlisted Ampere IDs are skipped |
+| 40 | AD102 | `2684` | RTX 4090 | Base ID, `targets=all` ok. Boot/inject OK; **perf needs re-verification** |
+| 40 | AD102 | `2685` | RTX 4090 D | `rtx4090d_experimental=1`, untested |
+| 40 | AD103 | `2704` | RTX 4080 | `rtx4080_experimental=1` + exact BDF. **Verified (ours, 0.2.12)** |
+| 40 | AD103 | `2702` | RTX 4080 SUPER | `ad103_experimental=1` + exact BDF, untested |
+| 40 | AD103 | `2705` | RTX 4070 Ti SUPER | `ad103_experimental=1` + exact BDF, untested |
+| 40 | AD106 | `2805` | RTX 4060 Ti 16GB | `ad106_experimental=1` + exact BDF, untested |
+| 40 | AD107 | not listed (`28a1 28e1` …) | **RTX 4050** laptop | **Not supported**: Ada admission rejects it |
+
+**RTX 3050 and RTX 4050 are not supported.** Any ID not in this table on Ampere/Ada is skipped with a log line; only Turing still force-injects by range.
 
 ### Ada / RTX 40-series
 
@@ -262,7 +292,7 @@ Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw 
 | --- | --- |
 | Stick is not listed, or the menu never appears | Secure Boot is still on, or the firmware boot menu was not set to the stick |
 | `firmware missing` / `load_fw error=-2` | Generate that arch's blobs and run `New-GpuUnlockUsb.ps1` again |
-| Menu is not `0.2.12 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
+| Menu is not `0.2.13 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
 | Keyboard dead in the menu | 0.2.3 and later connect USB before the menu. Rewrite the stick with a current EFI |
 | RTX 3070 Ti stays black after inject | Wait about a minute. The measured boot did this and then reached Windows |
 | No internal disk in the target list | The firmware did not publish a FAT EFI partition on NVMe or SATA, or the only loader there is this unsigned wrapper |
@@ -404,7 +434,7 @@ Build runs Prepare first (`-SkipPrepare` only after that succeeded in the same t
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.12`).
+Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.13`).
 
 Ada uses the AD102 Linux transaction (four-PLM V67, then FLR). Ampere uses the GA102 Linux transaction (V67, selectors, then FLR). Turing writes the selectors and does not FLR.
 
@@ -446,7 +476,7 @@ Install, skip, and entering Windows were tested in a Generation 2 VM with no NVI
 2. Shut it down. Settings → Security → clear **Enable Secure Boot**.
 3. Copy `build\UnlockLoader-Turing.efi` and `tools\` into the guest.
 4. Run the ESP install from an elevated PowerShell in the guest.
-5. Reboot. The menu should say `GPU Unlock Loader 0.2.12 (Turing)`. Enter or the timeout should start Windows.
+5. Reboot. The menu should say `GPU Unlock Loader 0.2.13 (Turing)`. Enter or the timeout should start Windows.
 
 With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
 
@@ -484,7 +514,7 @@ With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
   edk2/                    local download, not in git
   LICENSE                  GPL-2.0-only
   NOTICE                   attribution
-  VERSION                  0.2.12
+  VERSION                  0.2.13
   README.md                English
   README_zh.md             Chinese
 ```
@@ -500,6 +530,8 @@ NVIDIA firmware stays under NVIDIA's license and is not in git.
 ---
 
 ## Changelog
+
+`0.2.13`: Ampere no longer force-injects IDs that only match the `0x2200-0x25ff` range (GA107 / laptop RTX 3050 and other unlisted parts are skipped with a log line). RTX 3050 GA106 (`2507`/`2508`) is skipped too. RTX 4050 (AD107) stays rejected by Ada admission. Turing range force-inject unchanged. README adds a 20/30/40-series support table built from the code ID lists.
 
 `0.2.12` follows the TOTORONG AD103 Windows unlocker handoff: preload (LoadImage) Windows Boot Manager before disconnect/unlock when possible; keep pre-FLR `driver_release`; after FLR, `ConnectController` reconnects GOP, re-check selectors (`post-GOP-reconnect`), then StartImage the preloaded image (falls back to the previous LoadImage path if preload missed or StartImage fails). Ada/Ampere success paths both reconnect. Unlock payload unchanged.
 

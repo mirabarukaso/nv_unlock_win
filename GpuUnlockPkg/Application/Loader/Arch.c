@@ -182,9 +182,34 @@ TargetListed (
   return FALSE;
 }
 
+#if defined(TU_BUILD_ARCH_AMPERE)
+/*
+ * 0.2.13: RTX 3050 is temporarily not supported. GA106 3050 IDs (2507/2508)
+ * are still on the Ampere list from upstream but are skipped here; to
+ * re-enable later, remove them from this table. GA107/laptop 3050 IDs are
+ * not on the list and are covered by the range-only skip in TuUnlockAll.
+ */
+STATIC CONST UINT16 mAmpereBlockedIds[] = { 0x2507, 0x2508 };
+
+STATIC
+BOOLEAN
+AmpereBlocked (
+  UINT16  DeviceId
+  )
+{
+  UINTN  Index;
+
+  for (Index = 0; Index < ARRAY_SIZE (mAmpereBlockedIds); Index++) {
+    if (mAmpereBlockedIds[Index] == DeviceId) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+#endif
+
 EFI_STATUS
-TuUnlockAll (
-  IN EFI_HANDLE       ImageHandle,
+TuUnlockAll (  IN EFI_HANDLE       ImageHandle,
   IN CONST TU_CONFIG  *Config,
   IN TU_PCI_GPU       *Gpus,
   IN UINTN            GpuCount
@@ -231,6 +256,17 @@ TuUnlockAll (
       TuLogWide (L"Skipping %a (not in targets)\r\n", Name);
       continue;
     }
+#if defined(TU_BUILD_ARCH_AMPERE)
+    if (Gpus[Index].Arch == TuArchAmpere && AmpereBlocked (Gpus[Index].DeviceId)) {
+      TuLogWide (
+        L"Skipping %a 10de:%04x (RTX 3050 not supported)\r\n",
+        Name,
+        Gpus[Index].DeviceId
+        );
+      GU_NOTE ("skip blocked Ampere 10de:%04x\n", Gpus[Index].DeviceId);
+      continue;
+    }
+#endif
     if (!Gpus[Index].UnlockSupported) {
       /* Ada experimental / unknown IDs must go through TuAdaAdmitUnlock; do
        * not force-inject a readout-only Ada BAR onto AD102 assets. */
@@ -241,6 +277,19 @@ TuUnlockAll (
           Gpus[Index].DeviceId
           );
         GU_NOTE ("skip unadmitted Ada 10de:%04x\n", Gpus[Index].DeviceId);
+        continue;
+      }
+      /* Ampere: range-only match (0x2200-0x25ff, not on the explicit list)
+       * covers GA107 / laptop RTX 3050 and other untested parts. Do not
+       * force-inject them (0.2.13). Turing keeps range force-inject below:
+       * old parts, no reported harm (e.g. TITAN RTX 1e02). */
+      if (Gpus[Index].Arch == TuArchAmpere) {
+        TuLogWide (
+          L"Skipping %a 10de:%04x (unlisted Ampere ID; 3050/laptop parts not supported)\r\n",
+          Name,
+          Gpus[Index].DeviceId
+          );
+        GU_NOTE ("skip unlisted Ampere 10de:%04x\n", Gpus[Index].DeviceId);
         continue;
       }
       TuLogWide (
