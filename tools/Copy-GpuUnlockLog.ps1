@@ -43,7 +43,7 @@ try {
     $logs = @(Get-ChildItem -LiteralPath $srcDir -File -Force -Filter '*.log' |
         Sort-Object LastWriteTime -Descending)
     if ($logs.Count -eq 0) {
-        throw "No *.log under $srcDir. The loader writes unlock.log on the way into Windows."
+        throw "No *.log under $srcDir. The loader writes unlock-YYYYMMDD-HHMMSS.log on the way into Windows."
     }
 
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null

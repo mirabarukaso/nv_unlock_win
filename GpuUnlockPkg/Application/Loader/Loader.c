@@ -67,6 +67,9 @@ UefiMain (
         );
     }
 
+    TuLogWide (L"inject begin\r\n");
+    TuLogFlush ();
+
     Status = TuUnlockAll (ImageHandle, &Config, Gpus, GpuCount);
     GU_NOTE ("inject finished status=%x\n", Status);
     for (Index = 0; Index < GpuCount; Index++) {
@@ -74,6 +77,7 @@ UefiMain (
     }
     TuShow (L"\r\nFeat AFTER inject:\r\n");
     TuMenuPrintFeat (Gpus, GpuCount);
+    TuLogFlush ();
     TuMenuWaitContinue (TU_POST_INJECT_WAIT_SEC);
   } else {
     TuChainloadClearPreload ();

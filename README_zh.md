@@ -12,7 +12,7 @@
 
 Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，可选解锁 GPU，再启动内部磁盘上的 Windows、GRUB、systemd-boot 或其它 x64 EFI 加载器。U 盘不改内部 EFI 系统分区（ESP），固件启动菜单仍然可以启动已经装在那里的系统。
 
-版本 `0.2.13`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
+版本 `0.2.14`。许可证：GPL-2.0-only，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。历史在[文末](#更新记录)。
 
 多数人看到 [使用](#使用) 即可：下载 release 里的 EFI，生成对应 firmware，拷到 U 盘。[从头编译](#从头编译) 只在你要自己编 EFI 时才需要。
 
@@ -128,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\New-GpuUnlockUsb.ps1 -DriveLett
 ### 启动菜单
 
 ```
-GPU Unlock Loader 0.2.13 (Turing)
+GPU Unlock Loader 0.2.14 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -160,7 +160,7 @@ NVMe ns=1 part=1
 
 ### 启动日志
 
-选中的加载器启动前，U 盘上会有 `\EFI\turing-unlock\unlock.log`。PCI 扫描总会为每张卡写一行 `Found <seg:bus:dev.fn>  10de:<id>  <Arch>`（Skip 和 Inject 都有）。里面还有 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）、`boot mode=usb`，以及注入后每张卡一行 `unlock 10de:<id> result=<errno>`。`inject finished status=0` 表示每张尝试过的卡都返回 0。失败时这条是 `status=8000000000000007`（`EFI_DEVICE_ERROR`）。启动项列表仍会出现。选中项记成 `boot choice <n> <title> <path>`。
+选中的加载器启动前，U 盘上会有一份新文件 `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log`（每次启动一个文件；固件时钟读不到时才退回 `unlock.log`）。每一行以 `[YYYY-MM-DD HH:MM:SS]` 开头。Inject 开始时、Inject 返回后、以及启动 Windows Boot Manager 之前各写一次，所以黑屏期间复位仍能看出这次走到哪。出现 `Starting EFI loader` 表示这次已经进入 Windows Boot Manager。PCI 扫描总会为每张卡写一行 `Found <seg:bus:dev.fn>  10de:<id>  <Arch>`（Skip 和 Inject 都有）。里面还有 `handoff`（PLM/SS0/SS1/readout、WPR2、boot、GSP/SEC CPUCTL、PCI command、BAR0）、`boot mode=usb`，以及注入后每张卡一行 `unlock 10de:<id> result=<errno>`。`inject finished status=0` 表示每张尝试过的卡都返回 0。失败时这条是 `status=8000000000000007`（`EFI_DEVICE_ERROR`）。启动项列表仍会出现。选中项记成 `boot choice <n> <title> <path>`。
 
 日志留在 U 盘上。启动一个能读这块 FAT 的系统后把文件拷出来。过程记录都在这个文件里，屏幕上的一次性结果（选项、解锁结果、chainload 错误）也会写进去。菜单每秒重画一次，不会重复写进文件。要在屏幕上同时看到文件内容，把 `config.ini` 里的 `verbose` 改成 `1`。
 
@@ -292,7 +292,7 @@ GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很�
 | --- | --- |
 | 启动菜单里没有这块 U 盘，或看不到 loader 菜单 | Secure Boot 仍开着，或固件启动菜单没有选这块 U 盘 |
 | `firmware missing` / `load_fw error=-2` | 生成该架构的 blob，再跑一次 `New-GpuUnlockUsb.ps1` |
-| 菜单不是 `0.2.13 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
+| 菜单不是 `0.2.14 (<Arch>)` | U 盘上还是旧 EFI。再跑一次 U 盘脚本 |
 | 菜单里键盘没反应 | 0.2.3 及以后会在进菜单前连接 USB。用当前 EFI 重写 U 盘 |
 | RTX 3070 Ti 注入后一直黑屏 | 等大约 1 分钟。实测启动就是这样，然后进入了 Windows |
 | 列表里没有内部磁盘 | 固件没有在 NVMe 或 SATA 上挂出 FAT EFI 分区，或那里唯一的加载器就是这份未签名包装器 |
@@ -434,7 +434,7 @@ Prepare 检查 Windows x64、VS2022 C++（17.x）、Python 3.6+、NASM 2.15.05+�
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.13`）。
+`iasl`、CLANG、Cygwin 的提示可以忽略。成功后再编一次是增量的。菜单里的版本必须和 `GpuUnlockPkg\Include\TuConfig.h` 里的 `TU_LOADER_VERSION` 一致（现在是 `0.2.14`）。
 
 Ada 用 AD102 的 Linux 事务（four-PLM V67，然后 FLR）。Ampere 用 GA102 的 Linux 事务（V67、选择器，然后 FLR）。Turing 写选择器，不做 FLR。
 
@@ -476,7 +476,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
 2. 关机。设置 → 安全 → 取消 **启用安全启动**。
 3. 把 `build\UnlockLoader-Turing.efi` 和 `tools\` 拷进虚拟机。
 4. 在虚拟机里用管理员 PowerShell 跑 ESP 安装。
-5. 重启。菜单应显示 `GPU Unlock Loader 0.2.13 (Turing)`。回车或超时后应进入 Windows。
+5. 重启。菜单应显示 `GPU Unlock Loader 0.2.14 (Turing)`。回车或超时后应进入 Windows。
 
 没有直通 GPU 时，Inject 打印 `gpu_count=0`，不写 MMIO。
 
@@ -514,7 +514,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Clear-GpuUnlock.ps1 -Firmware
   edk2/                    本地下载，不入库
   LICENSE                  GPL-2.0-only
   NOTICE                   署名
-  VERSION                  0.2.13
+  VERSION                  0.2.14
   README.md                英文
   README_zh.md             中文
 ```
@@ -530,6 +530,8 @@ NVIDIA firmware 仍受 NVIDIA 许可约束，不在 git 里。
 ---
 
 ## 更新记录
+
+`0.2.14` 每次启动写一份日志 `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log`，不再覆盖 `unlock.log`。文件里每一行以 `[YYYY-MM-DD HH:MM:SS]` 开头。Inject 开始时、Inject 返回后、以及 `StartImage` 之前各落盘一次，黑屏期间复位仍能看出有没有进入 Windows Boot Manager。
 
 `0.2.13`：Ampere 不再对只按 `0x2200-0x25ff` 范围匹配到的 ID 强制注入（GA107 / 笔记本 RTX 3050 等未列出型号记录日志后跳过）。RTX 3050 GA106（`2507`/`2508`）同样跳过。RTX 4050（AD107）仍由 Ada 准入拒绝。Turing 的范围强制注入不变。README 新增按代码 ID 列表整理的 20/30/40 系支持表。
 

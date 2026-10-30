@@ -62,7 +62,7 @@ rtx4080_experimental=1
 targets=0000:01:00.0
 ```
 
-Get the BDF from the loader menu (`seg:bus:dev.fn` on screen), from the `Found ...` line in `unlock.log` on **0.2.9+** (skip is enough; older skip logs only had `10de:2704`), or from Windows `nvidia-smi --query-gpu=pci.bus_id,name --format=csv` / Device Manager location.
+Get the BDF from the loader menu (`seg:bus:dev.fn` on screen), from the `Found ...` line in the loader log on **0.2.9+** (`unlock-YYYYMMDD-HHMMSS.log` since 0.2.14, previously `unlock.log`; skip is enough; older skip logs only had `10de:2704`), or from Windows `nvidia-smi --query-gpu=pci.bus_id,name --format=csv` / Device Manager location.
 
 On Windows, turn **Fast Startup** off (full shutdown between inject tests).
 TOTORONG's public AD103/`2704` Windows unlocker and upstream #92 (`2705`)

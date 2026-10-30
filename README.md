@@ -12,7 +12,7 @@
 
 Unsigned EFI loader for Turing, Ampere, and Ada. Boot it from a FAT32 USB stick, optionally unlock the GPU, then start Windows, GRUB, systemd-boot, or another x64 EFI loader on an internal disk. The stick does not modify the internal EFI system partition (ESP), so the firmware boot menu can still start the systems already installed there.
 
-Version `0.2.13`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
+Version `0.2.14`. License: GPL-2.0-only, see [LICENSE](LICENSE) and [NOTICE](NOTICE). History is at the [end](#changelog).
 
 Most people stop after [Use](#use): download a release EFI, generate the matching firmware, copy both onto a USB stick. [Build from source](#build-from-source) is only for compiling the EFI yourself.
 
@@ -128,7 +128,7 @@ In the firmware boot menu, boot the stick. Secure Boot stays off.
 ### Boot menu
 
 ```
-GPU Unlock Loader 0.2.13 (Turing)
+GPU Unlock Loader 0.2.14 (Turing)
 
 NVIDIA display GPUs: 1
   0000:65:00.0  10de:1e02  Turing
@@ -160,7 +160,7 @@ A listed file is an x64 UEFI application and does not contain this loader's magi
 
 ### Loader log
 
-Before the chosen loader starts, the stick gets `\EFI\turing-unlock\unlock.log`. PCI scan always logs each GPU as `Found <seg:bus:dev.fn>  10de:<id>  <Arch>` (skip and inject). It also includes `handoff` (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0), `boot mode=usb`, and after inject one `unlock 10de:<id> result=<errno>` line per GPU. `inject finished status=0` means every attempted GPU returned 0. A failure leaves `status=8000000000000007` (`EFI_DEVICE_ERROR`). The target list still appears. The choice is logged as `boot choice <n> <title> <path>`.
+Before the chosen loader starts, the stick gets a new file `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log` (one file per boot; `unlock.log` is only the fallback if the firmware clock cannot be read). Each line starts with `[YYYY-MM-DD HH:MM:SS]`. The file is written when inject starts, again after inject returns, and again immediately before Windows Boot Manager is started, so a reset during a black screen can still show how far that boot got. `Starting EFI loader` means this boot reached Windows Boot Manager. PCI scan always logs each GPU as `Found <seg:bus:dev.fn>  10de:<id>  <Arch>` (skip and inject). It also includes `handoff` (PLM/SS0/SS1/readout, WPR2, boot, GSP/SEC CPUCTL, PCI command, BAR0), `boot mode=usb`, and after inject one `unlock 10de:<id> result=<errno>` line per GPU. `inject finished status=0` means every attempted GPU returned 0. A failure leaves `status=8000000000000007` (`EFI_DEVICE_ERROR`). The target list still appears. The choice is logged as `boot choice <n> <title> <path>`.
 
 The log stays on the stick. Copy the file off after you boot an OS that can read that FAT volume. Register traces stay in that file, and so does each one-shot line the screen shows (the choice, unlock result, and a chainload error). The menu itself is redrawn every second and is not copied into the file. Set `verbose=1` in `config.ini` to mirror the file onto the screen.
 
@@ -292,7 +292,7 @@ Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw 
 | --- | --- |
 | Stick is not listed, or the menu never appears | Secure Boot is still on, or the firmware boot menu was not set to the stick |
 | `firmware missing` / `load_fw error=-2` | Generate that arch's blobs and run `New-GpuUnlockUsb.ps1` again |
-| Menu is not `0.2.13 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
+| Menu is not `0.2.14 (<Arch>)` | The stick still has an older EFI. Run the USB script again |
 | Keyboard dead in the menu | 0.2.3 and later connect USB before the menu. Rewrite the stick with a current EFI |
 | RTX 3070 Ti stays black after inject | Wait about a minute. The measured boot did this and then reached Windows |
 | No internal disk in the target list | The firmware did not publish a FAT EFI partition on NVMe or SATA, or the only loader there is this unsigned wrapper |
@@ -434,7 +434,7 @@ Build runs Prepare first (`-SkipPrepare` only after that succeeded in the same t
 .\tools\Build-GpuUnlockEfi.ps1 -Arch Turing -Edk2Path C:\edk2 -NasmPrefix .\nasm-3.02\ -Target RELEASE -ToolChain VS2022
 ```
 
-Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.13`).
+Warnings about `iasl`, CLANG, and Cygwin can be ignored. A second build is incremental. The menu version must match `TU_LOADER_VERSION` in `GpuUnlockPkg\Include\TuConfig.h` (currently `0.2.14`).
 
 Ada uses the AD102 Linux transaction (four-PLM V67, then FLR). Ampere uses the GA102 Linux transaction (V67, selectors, then FLR). Turing writes the selectors and does not FLR.
 
@@ -476,7 +476,7 @@ Install, skip, and entering Windows were tested in a Generation 2 VM with no NVI
 2. Shut it down. Settings → Security → clear **Enable Secure Boot**.
 3. Copy `build\UnlockLoader-Turing.efi` and `tools\` into the guest.
 4. Run the ESP install from an elevated PowerShell in the guest.
-5. Reboot. The menu should say `GPU Unlock Loader 0.2.13 (Turing)`. Enter or the timeout should start Windows.
+5. Reboot. The menu should say `GPU Unlock Loader 0.2.14 (Turing)`. Enter or the timeout should start Windows.
 
 With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
 
@@ -514,7 +514,7 @@ With no GPU passed through, Inject prints `gpu_count=0` and does not write MMIO.
   edk2/                    local download, not in git
   LICENSE                  GPL-2.0-only
   NOTICE                   attribution
-  VERSION                  0.2.13
+  VERSION                  0.2.14
   README.md                English
   README_zh.md             Chinese
 ```
@@ -530,6 +530,8 @@ NVIDIA firmware stays under NVIDIA's license and is not in git.
 ---
 
 ## Changelog
+
+`0.2.14` writes one log per boot, `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log`, instead of overwriting `unlock.log`. Every file line starts with `[YYYY-MM-DD HH:MM:SS]`. The log is flushed when inject starts, after inject returns, and again immediately before `StartImage`, so a reset during a black screen can still show whether Windows Boot Manager was entered.
 
 `0.2.13`: Ampere no longer force-injects IDs that only match the `0x2200-0x25ff` range (GA107 / laptop RTX 3050 and other unlisted parts are skipped with a log line). RTX 3050 GA106 (`2507`/`2508`) is skipped too. RTX 4050 (AD107) stays rejected by Ada admission. Turing range force-inject unchanged. README adds a 20/30/40-series support table built from the code ID lists.
 

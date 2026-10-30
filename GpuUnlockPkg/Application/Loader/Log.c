@@ -3,6 +3,8 @@
 #include "TuConfig.h"
 #include "TuFs.h"
 
+#include <Library/UefiRuntimeServicesTableLib.h>
+
 #define TU_LOG_MAX  (64u * 1024u)
 
 STATIC EFI_HANDLE  mLogImage;
@@ -10,6 +12,8 @@ STATIC BOOLEAN     mLogVerbose = TRUE;
 STATIC CHAR8       *mLogBuf;
 STATIC UINTN       mLogLen;
 STATIC UINTN       mLogCap;
+STATIC BOOLEAN     mLogAtLineStart = TRUE;
+STATIC CHAR16      mLogPath[96];
 
 STATIC
 BOOLEAN
@@ -45,17 +49,12 @@ TuLogReserve (
 
 STATIC
 VOID
-TuLogAppend (
-  IN CONST CHAR8  *Text
+TuLogAppendRaw (
+  IN CONST CHAR8  *Text,
+  IN UINTN        Add
   )
 {
-  UINTN  Add;
-
-  if (Text == NULL) {
-    return;
-  }
-  Add = AsciiStrLen (Text);
-  if (Add == 0) {
+  if ((Text == NULL) || (Add == 0)) {
     return;
   }
   if (!TuLogReserve (mLogLen + Add + 1)) {
@@ -64,6 +63,70 @@ TuLogAppend (
   CopyMem (mLogBuf + mLogLen, Text, Add);
   mLogLen += Add;
   mLogBuf[mLogLen] = 0;
+}
+
+STATIC
+VOID
+TuFormatStamp (
+  OUT CHAR8  *Buf,
+  IN UINTN   Cap
+  )
+{
+  EFI_TIME    Now;
+  EFI_STATUS  Status;
+
+  if ((gRT == NULL) || (Cap < 24)) {
+    AsciiSPrint (Buf, Cap, "[----/--/-- --:--:--] ");
+    return;
+  }
+  Status = gRT->GetTime (&Now, NULL);
+  if (EFI_ERROR (Status)) {
+    AsciiSPrint (Buf, Cap, "[----/--/-- --:--:--] ");
+    return;
+  }
+  AsciiSPrint (
+    Buf,
+    Cap,
+    "[%04u-%02u-%02u %02u:%02u:%02u] ",
+    (UINTN)Now.Year,
+    (UINTN)Now.Month,
+    (UINTN)Now.Day,
+    (UINTN)Now.Hour,
+    (UINTN)Now.Minute,
+    (UINTN)Now.Second
+    );
+}
+
+STATIC
+VOID
+TuLogAppend (
+  IN CONST CHAR8  *Text
+  )
+{
+  CHAR8  Stamp[32];
+  UINTN  Index;
+  UINTN  Start;
+
+  if ((Text == NULL) || (Text[0] == 0)) {
+    return;
+  }
+  Index = 0;
+  while (Text[Index] != 0) {
+    if (mLogAtLineStart) {
+      TuFormatStamp (Stamp, sizeof (Stamp));
+      TuLogAppendRaw (Stamp, AsciiStrLen (Stamp));
+      mLogAtLineStart = FALSE;
+    }
+    Start = Index;
+    while ((Text[Index] != 0) && (Text[Index] != '\n')) {
+      Index++;
+    }
+    if (Text[Index] == '\n') {
+      Index++;
+      mLogAtLineStart = TRUE;
+    }
+    TuLogAppendRaw (Text + Start, Index - Start);
+  }
 }
 
 STATIC
@@ -294,15 +357,44 @@ TuFormat (
   Buf[Used < Cap ? Used : Cap - 1] = 0;
 }
 
+STATIC
+VOID
+TuLogSetPath (
+  VOID
+  )
+{
+  EFI_TIME    Now;
+  EFI_STATUS  Status;
+
+  Status = (gRT != NULL) ? gRT->GetTime (&Now, NULL) : EFI_NOT_READY;
+  if (EFI_ERROR (Status)) {
+    StrCpyS (mLogPath, ARRAY_SIZE (mLogPath), TU_LOG_NAME);
+    return;
+  }
+  UnicodeSPrint (
+    mLogPath,
+    sizeof (mLogPath),
+    L"\\EFI\\turing-unlock\\unlock-%04u%02u%02u-%02u%02u%02u.log",
+    (UINTN)Now.Year,
+    (UINTN)Now.Month,
+    (UINTN)Now.Day,
+    (UINTN)Now.Hour,
+    (UINTN)Now.Minute,
+    (UINTN)Now.Second
+    );
+}
+
 VOID
 TuLogInit (
   IN EFI_HANDLE  ImageHandle,
   IN BOOLEAN     Verbose
   )
 {
-  mLogImage   = ImageHandle;
-  mLogVerbose = Verbose;
-  mLogLen     = 0;
+  mLogImage       = ImageHandle;
+  mLogVerbose     = Verbose;
+  mLogLen         = 0;
+  mLogAtLineStart = TRUE;
+  TuLogSetPath ();
   TuLogAppend ("---- turing-unlock loader ----\r\n");
 }
 
@@ -316,15 +408,18 @@ TuLogFlush (
   if (mLogImage == NULL || mLogBuf == NULL || mLogLen == 0) {
     return;
   }
-  Status = TuFsWriteFile (mLogImage, TU_LOG_NAME, mLogBuf, mLogLen, FALSE);
+  if (mLogPath[0] == 0) {
+    TuLogSetPath ();
+  }
+  Status = TuFsWriteFile (mLogImage, mLogPath, mLogBuf, mLogLen, FALSE);
   if (EFI_ERROR (Status)) {
     if (gST != NULL && gST->ConOut != NULL) {
-      gST->ConOut->OutputString (gST->ConOut, L"unlock.log write failed\r\n");
+      gST->ConOut->OutputString (gST->ConOut, L"loader log write failed\r\n");
     }
     return;
   }
-  /* Keep the buffer. A later flush rewrites the whole file, so a boot
-   * choice recorded after the first flush is still in unlock.log.
+  /* Keep the buffer. A later flush rewrites this same timestamped file,
+   * so lines recorded after the first flush stay in the session log.
    */
 }
 

@@ -5,7 +5,7 @@
 #include <Uefi.h>
 
 #define TU_LOADER_MAGIC        "TURING_UNLOCK_LOADER_v1"
-#define TU_LOADER_VERSION      "0.2.13"
+#define TU_LOADER_VERSION      "0.2.14"
 
 #if defined(TU_BUILD_ARCH_TURING)
 # if defined(TU_BUILD_ARCH_AMPERE) || defined(TU_BUILD_ARCH_ADA)
@@ -24,6 +24,9 @@
 #endif
 #define TU_DIR_NAME            L"\\EFI\\turing-unlock"
 #define TU_CONFIG_NAME         L"\\EFI\\turing-unlock\\config.ini"
+/* Fallback when the firmware clock cannot be read. A normal boot writes
+ * \EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log instead.
+ */
 #define TU_LOG_NAME            L"\\EFI\\turing-unlock\\unlock.log"
 #define TU_USB_BOOT_MARK       L"\\EFI\\turing-unlock\\usb-boot"
 #define TU_MS_BOOT_BACKUP      L"\\EFI\\turing-unlock\\bootmgfw_ms.efi"

@@ -8,7 +8,7 @@
   DEC_SPECIFICATION              = 0x0001001B
   PACKAGE_NAME                   = GpuUnlockPkg
   PACKAGE_GUID                   = C5A12F08-44E1-4B9A-A6D3-0F8E21C7A112
-  PACKAGE_VERSION                = 0.2.13
+  PACKAGE_VERSION                = 0.2.14
 
 [Includes]
   Include

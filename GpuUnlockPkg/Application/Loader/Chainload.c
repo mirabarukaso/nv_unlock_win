@@ -426,10 +426,15 @@ StartWindowsImage (
   UINTN       ExitSize;
 
   TuShow (L"Starting EFI loader...\r\n");
+  /* StartImage does not return when Windows Boot Manager takes over.
+   * Flush first so the stick shows whether this boot reached winboot.
+   */
+  TuLogFlush ();
   ExitData = NULL;
   ExitSize = 0;
   Status   = gBS->StartImage (Image, &ExitSize, &ExitData);
   PrintStatus (L"StartImage returned", Status);
+  TuLogFlush ();
   return Status;
 }
 
