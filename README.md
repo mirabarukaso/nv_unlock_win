@@ -2,7 +2,7 @@
 > Secure Boot was off for these runs.
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
-> - **RTX 3070 Ti** (GA104, `10de:2482`), Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 3070 Ti** (GA104, `10de:2482`), ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2)). Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
 > - **RTX 4080** (AD103, `10de:2704`) works on Windows 11 + UEFI loader **0.2.12**, driver 617.42 — FP16 98.6→160.4 TFLOPS (+63%), BF16 98.4→163.7 (+66%) ([#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Details: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
 > - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Config support for base ID `2684` is unchanged.
 
