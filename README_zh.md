@@ -2,7 +2,7 @@
 > 这些测试都关闭了 Secure Boot。
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
-> - **RTX 3070 Ti**（GA104，`10de:2482`），Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 3070 Ti**（GA104，`10de:2482`） ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2))，Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
 > - **RTX 4080**（AD103，`10de:2704`）在 Windows 11 + UEFI loader **0.2.12** 上可用，驱动 617.42 — FP16 98.6→160.4 TFLOPS（+63%），BF16 98.4→163.7（+66%）（[#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)）。需要 `rtx4080_experimental=1` 以及 `targets` 里的**精确** PCI BDF（不能用 `all`）。详情：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 > - **RTX 4090**（AD102，`10de:2684`）— **需重新验证**。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。此前发布的 Windows GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 ID `2684` 的配置支持不变。
 
