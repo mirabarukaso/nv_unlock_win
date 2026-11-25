@@ -1,8 +1,9 @@
 > [!IMPORTANT]
-> Secure Boot was off for these runs.
+> Most of these runs had Secure Boot off. One community report kept Secure Boot on (self-signed `db`).
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
 > - **RTX 3070 Ti** (GA104, `10de:2482`), ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2)). Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 2080 Ti Rev. A** (TU102, `10de:1e07`), ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)). Windows 11, driver 621.24, loader 0.2.14. Secure Boot **on** (self-enrolled `db` cert). `TU102 FEAT UNLOCKED`; no Code 43. cuBLAS FP16 GEMM unlock signal (FP32-accum / FP16-accum ratio) ~0.55 locked → ~0.97 unlocked. FLR/TDR can clear the unlock until the next loader boot.
 > - **RTX 4080** (AD103, `10de:2704`) works on Windows 11 + UEFI loader **0.2.12**, driver 617.42 — FP16 98.6→160.4 TFLOPS (+63%), BF16 98.4→163.7 (+66%) ([#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Details: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
 > - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Config support for base ID `2684` is unchanged.
 
@@ -177,7 +178,7 @@ Built from the ID lists in code (`Arch/Turing/TuringIds.c`, `Arch/Ampere/Ampere.
 | Series | Chip | PCI IDs in code (`10de:`) | Cards | Status |
 | --- | --- | --- | --- | --- |
 | 20 | TU102 | `1e02` (not listed, range match) | TITAN RTX | **Verified (ours)**: force-inject works, no gain (factory full) |
-| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **Verified upstream** (nlzy, Dell 2080 Ti) |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **Verified upstream** (nlzy) and **community Windows** ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5), Rev. A, SB on) |
 | 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / engineering samples | Listed, untested |
 | 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | Listed, untested |
 | 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | Listed, untested |
@@ -282,9 +283,11 @@ Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Me
 
 **RTX 4090** (`10de:2684`, AD102) — **needs re-verification.** Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`; Windows started. Earlier published Windows cuBLAS FP16 GEMM figures for this SKU are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Base Ada config for `2684` is unchanged.
 
+**RTX 2080 Ti Rev. A** (`10de:1e07`, TU102), community ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)): Windows 11 build 26300, driver 621.24, loader 0.2.14, Secure Boot on with a self-enrolled `db` certificate. Log: `TU102 FEAT UNLOCKED`, handoff with `ss0=0x88888888 ss1=0x00000008`. No Code 43; `nvidia-smi` worked. Unlock check was the ratio of FP32-accumulate to FP16-accumulate cuBLAS FP16 GEMM throughput (~0.55 locked → ~0.97 unlocked at 8192). A later GSP fault / FLR-style recovery left ratios near locked until the next loader boot. Full log, BitLocker/PCR4 notes: the issue.
+
 On Ada, register-resident issue-rate probes (such as `mma_bench_sm89`) and large cuBLAS GEMM can disagree a lot: GEMM often sits on the power limit. Prefer the issue-rate probe for unlock proof.
 
-Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
+Full-speed tensor cores draw a lot of power and can damage hardware. Non-A `1e04` still has an open Code 43 report in [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1); do not treat #5 as coverage for every 2080 Ti board.
 
 ### Runtime troubleshooting
 

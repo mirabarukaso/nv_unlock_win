@@ -1,8 +1,9 @@
 > [!IMPORTANT]
-> 这些测试都关闭了 Secure Boot。
+> 多数测试关闭了 Secure Boot。有一份社区报告在 Secure Boot 开启（自签证书进 `db`）下成功。
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
 > - **RTX 3070 Ti**（GA104，`10de:2482`） ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2))，Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 2080 Ti Rev. A**（TU102，`10de:1e07`）([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5))，Windows 11，驱动 621.24，loader 0.2.14。Secure Boot **开启**（自签证书写入固件 `db`）。`TU102 FEAT UNLOCKED`；无 Code 43。cuBLAS FP16 GEMM 解锁信号（FP32 累加 / FP16 累加吞吐比）约 0.55（锁定）→ 约 0.97（解锁）。FLR/TDR 可能清掉解锁，直到下次经 loader 启动。
 > - **RTX 4080**（AD103，`10de:2704`）在 Windows 11 + UEFI loader **0.2.12** 上可用，驱动 617.42 — FP16 98.6→160.4 TFLOPS（+63%），BF16 98.4→163.7（+66%）（[#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)）。需要 `rtx4080_experimental=1` 以及 `targets` 里的**精确** PCI BDF（不能用 `all`）。详情：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 > - **RTX 4090**（AD102，`10de:2684`）— **需重新验证**。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。此前发布的 Windows GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 ID `2684` 的配置支持不变。
 
@@ -177,7 +178,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 | 系列 | 芯片 | 代码中的 PCI ID（`10de:`） | 显卡 | 状态 |
 | --- | --- | --- | --- | --- |
 | 20 | TU102 | `1e02`（不在列表，按范围匹配） | TITAN RTX | **已验证（本仓库）**：强制注入成功，无提升（出厂满血） |
-| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **上游已验证**（nlzy，Dell 2080 Ti） |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **上游已验证**（nlzy）+ **本仓库社区 Windows 验证**（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)，Rev. A，SB 开） |
 | 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / 工程样品 | 在列表，未测试 |
 | 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | 在列表，未测试 |
 | 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | 在列表，未测试 |
@@ -282,9 +283,11 @@ Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W
 
 **RTX 4090**（`10de:2684`，AD102）— **需重新验证。** Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`；Windows 正常启动。本 SKU 此前发布的 Windows cuBLAS FP16 GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 Ada 配置（`2684`）不变。
 
+**RTX 2080 Ti Rev. A**（`10de:1e07`，TU102），社区（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)）：Windows 11 build 26300，驱动 621.24，loader 0.2.14，Secure Boot 开启并自签证书写入固件 `db`。日志：`TU102 FEAT UNLOCKED`，交接 `ss0=0x88888888 ss1=0x00000008`。无 Code 43；`nvidia-smi` 可用。解锁核对用的是 cuBLAS FP16 GEMM 的 FP32 累加 / FP16 累加吞吐比（约 0.55 锁定 → 约 0.97 解锁，8192）。之后一次 GSP fault / 类似 FLR 的恢复把比值打回接近锁定，直到下次经 loader 启动。完整日志与 BitLocker/PCR4 说明见该 issue。
+
 在 Ada 上，寄存器驻留的指令发射率探针（如 `mma_bench_sm89`）与大尺寸 cuBLAS GEMM 经常差很多：GEMM 往往顶在功耗墙上。解锁证明请优先用发射率探针。
 
-GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很高，可能损坏硬件。
+Tensor core 满速功耗很高，可能损坏硬件。非 A 的 `1e04` 在 [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1) 仍有 Code 43 报告；不要把 #5 当成所有 2080 Ti 板卡都已验证。
 
 ### 使用时排障
 
