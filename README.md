@@ -1,8 +1,9 @@
 > [!IMPORTANT]
-> Secure Boot was off for these runs.
+> Most of these runs had Secure Boot off. One community report kept Secure Boot on (self-signed `db`).
 >
 > - **TITAN RTX** (TU102, `10de:1e02`), Windows 10, driver 617.42. Loader printed `TU102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. FP16 GEMM at 8192 stayed 99.3 → 99.1 TFLOPS. This card is already factory-full.
 > - **RTX 3070 Ti** (GA104, `10de:2482`), ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2)). Windows 10, driver 617.42. Loader printed `GA102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. The display stays black for about a minute during boot. Wait. FP16 GEMM (FP32 accumulate) at 8192 rose from 48.5 to 86.3 TFLOPS (+78%).
+> - **RTX 2080 Ti Rev. A** (TU102, `10de:1e07`), ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)). Windows 11, driver 621.24, loader 0.2.14. Secure Boot **on** (self-enrolled `db` cert). `TU102 FEAT UNLOCKED`; no Code 43. cuBLAS FP16 GEMM unlock signal (FP32-accum / FP16-accum ratio) ~0.55 locked → ~0.97 unlocked. FLR/TDR can clear the unlock until the next loader boot.
 > - **RTX 4080** (AD103, `10de:2704`) works on Windows 11 + UEFI loader **0.2.12**, driver 617.42 — FP16 98.6→160.4 TFLOPS (+63%), BF16 98.4→163.7 (+66%) ([#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)). Needs `rtx4080_experimental=1` and an **exact** PCI BDF in `targets` (not `all`). Details: **[docs/RTX40_Ada.md](docs/RTX40_Ada.md)**.
 > - **RTX 4090** (AD102, `10de:2684`) — **needs re-verification**. Loader printed `AD102 FEAT UNLOCKED` with `SS0=88888888` `SS1=8`. Windows started. Published Windows GEMM numbers are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Config support for base ID `2684` is unchanged.
 
@@ -41,20 +42,22 @@ Linux module sources this tree ports (Ada Windows handoff also credits TOTORONG)
 
 **Advanced**
 
-10. [ESP install](#esp-install)
+10. [Choose a boot path](#choose-a-boot-path) (USB recommended)
+11. [ESP install](#esp-install)
+12. [Self-signing (Secure Boot)](#self-signing-secure-boot)
 
 **Build from source**
 
-11. [Prerequisites](#prerequisites)
-12. [Download the toolchain](#download-the-toolchain)
-13. [Prepare and build](#prepare-and-build)
-14. [Clear](#clear)
-15. [Hyper-V guest](#hyper-v-guest)
-16. [Build troubleshooting](#build-troubleshooting)
-17. [Layout](#layout)
+13. [Prerequisites](#prerequisites)
+14. [Download the toolchain](#download-the-toolchain)
+15. [Prepare and build](#prepare-and-build)
+16. [Clear](#clear)
+17. [Hyper-V guest](#hyper-v-guest)
+18. [Build troubleshooting](#build-troubleshooting)
+19. [Layout](#layout)
 
-18. [License](#license)
-19. [Changelog](#changelog)
+20. [License](#license)
+21. [Changelog](#changelog)
 
 ---
 
@@ -62,9 +65,11 @@ Linux module sources this tree ports (Ada Windows handoff also credits TOTORONG)
 
 ### Before you start
 
-Turn **Secure Boot off**. The loader is unsigned. Firmware will not load it while Secure Boot is on.
+**Prefer the USB stick.** It does not rewrite the internal ESP. See [Choose a boot path](#choose-a-boot-path) before any ESP install.
 
-Keep a WinPE disk or a bootable Windows installation disc nearby before you try the [ESP install](#esp-install). The USB path does not rewrite the internal ESP, so the firmware menu can still boot the disk you already use. The install disc matters once `bootmgfw.efi` on that ESP has been replaced.
+Turn **Secure Boot off** unless you [self-sign](#self-signing-secure-boot) the loader and enroll the cert into firmware `db`. The release EFI is unsigned. Firmware will not load it while Secure Boot is on.
+
+Keep a WinPE disk or a bootable Windows installation disc nearby before you try the [ESP install](#esp-install). The USB path does not rewrite the internal ESP, so the firmware menu can still boot the disk you already use. The install disc matters once `bootmgfw.efi` on that ESP has been replaced (Replace mode).
 
 Pick the EFI that matches the GPU. Turing blobs do not unlock Ampere or Ada.
 
@@ -177,7 +182,7 @@ Built from the ID lists in code (`Arch/Turing/TuringIds.c`, `Arch/Ampere/Ampere.
 | Series | Chip | PCI IDs in code (`10de:`) | Cards | Status |
 | --- | --- | --- | --- | --- |
 | 20 | TU102 | `1e02` (not listed, range match) | TITAN RTX | **Verified (ours)**: force-inject works, no gain (factory full) |
-| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **Verified upstream** (nlzy, Dell 2080 Ti) |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **Verified upstream** (nlzy) and **community Windows** ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5), Rev. A, SB on) |
 | 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / engineering samples | Listed, untested |
 | 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | Listed, untested |
 | 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | Listed, untested |
@@ -282,9 +287,11 @@ Skip: SM 2010 MHz, about 283–296 W. After inject: SM 1815 MHz, about 309 W. Me
 
 **RTX 4090** (`10de:2684`, AD102) — **needs re-verification.** Loader 0.2.7 printed `AD102 FEAT UNLOCKED`, handoff `PLM=ffffffff SS0=88888888 SS1=8`; Windows started. Earlier published Windows cuBLAS FP16 GEMM figures for this SKU are **withdrawn** pending a re-benchmark (unlocked 4080 0.2.12 MMA already exceeds the old figures). Base Ada config for `2684` is unchanged.
 
+**RTX 2080 Ti Rev. A** (`10de:1e07`, TU102), community ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)): Windows 11 build 26300, driver 621.24, loader 0.2.14, Secure Boot on with a self-enrolled `db` certificate. Log: `TU102 FEAT UNLOCKED`, handoff with `ss0=0x88888888 ss1=0x00000008`. No Code 43; `nvidia-smi` worked. Unlock check was the ratio of FP32-accumulate to FP16-accumulate cuBLAS FP16 GEMM throughput (~0.55 locked → ~0.97 unlocked at 8192). A later GSP fault / FLR-style recovery left ratios near locked until the next loader boot. Full log, BitLocker/PCR4 notes: the issue.
+
 On Ada, register-resident issue-rate probes (such as `mma_bench_sm89`) and large cuBLAS GEMM can disagree a lot: GEMM often sits on the power limit. Prefer the issue-rate probe for unlock proof.
 
-Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw a lot of power and can damage hardware.
+Full-speed tensor cores draw a lot of power and can damage hardware. Non-A `1e04` still has an open Code 43 report in [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1); do not treat #5 as coverage for every 2080 Ti board.
 
 ### Runtime troubleshooting
 
@@ -300,13 +307,32 @@ Inject on a GeForce 2080 Ti is not validated here. Full-speed tensor cores draw 
 
 ---
 
+## Choose a boot path
+
+Agents and operators: pick USB unless the user cannot boot from a stick. Do **not** rename Microsoft's `\EFI\Microsoft\Boot\bootmgfw.efi` away from that path for chainload — Windows Boot Manager / winload verify that name (recovery shows `0xc0000428`).
+
+| Path | Touches ESP `bootmgfw` | Secure Boot | Windows Update rewrite | BitLocker / PCR4 | Main residual risk | When to use |
+| --- | --- | --- | --- | --- | --- | --- |
+| USB (`New-GpuUnlockUsb.ps1`) | No | Off (unsigned) | N/A (internal ESP untouched) | Stick not in seal path | Must boot the stick each time | **Default / recommended** |
+| ESP `FirmwareEntry` | No (loader has its own NVRAM entry) | On only if [self-signed](#self-signing-secure-boot) into `db` | **Still happens** — WU / `Secure-Boot-Update` keeps writing Microsoft's `bootmgfw.efi`; the loader is just no longer that file | Microsoft build / BootOrder changes can demand the recovery key | BootOrder drop; PCR4 after bootmgr updates; less proven than USB | Internal ESP when Secure Boot must stay on and you need to avoid the Replace-mode *race* — **not** WU-proof |
+| ESP `Replace` | Yes (wrapper swap + Boot Guard) | Off | WU overwrites the **loader** at `bootmgfw.efi` | Same PCR sensitivity | Missed unlock after a fast reboot; `0xc0000428` if restore fails | Legacy ESP path when Secure Boot is off |
+
+> [!WARNING]
+> **FirmwareEntry does not stop Windows Update from rewriting boot files.** ([#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)) What it changes: Update may overwrite `bootmgfw.efi` freely; the unlock loader lives under `\EFI\turing-unlock\`, so that overwrite no longer removes the unlock EFI itself. What it does **not** fix: PCR4 / BitLocker after a new Microsoft bootmgr build; `{fwbootmgr}` reorder after BIOS or feature updates. Re-check BootOrder after major updates. Prefer USB when a stick is acceptable.
+
+After any ESP layout change or boot-manager update, suspend BitLocker for one reboot when needed: `Suspend-BitLocker -MountPoint C: -RebootCount 1`.
+
+---
+
 ## ESP install
 
-This path replaces `\EFI\Microsoft\Boot\bootmgfw.efi` on the internal ESP and registers a startup task. Have WinPE or a Windows installation disc ready first. The USB stick is the path that leaves that partition alone.
+Two modes on the internal ESP. Have WinPE or a Windows installation disc ready first. The USB stick is still the path that leaves that partition alone.
 
 A stock ESP is often about 100 MB. Turing's firmware fits beside the existing Windows boot files. Ampere and Ada each need `gsp_ga10x.bin`, about 80 MB, which does not fit a stock ESP next to `bootmgfw.efi`. Enlarging the ESP is your own step, with a partition tool you already use, such as MiniTool Partition Wizard. This README does not describe those tools. After the volume has room, the same install command works for Ampere and Ada.
 
-On the target Windows machine, elevated PowerShell:
+### Replace mode (default)
+
+Replaces `\EFI\Microsoft\Boot\bootmgfw.efi` with the loader and registers Boot Guard. On the target Windows machine, elevated PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Install-GpuUnlockBoot.ps1 -LoaderEfi C:\path\to\UnlockLoader-Turing.efi -FirmwareDir .\assets\firmware\Turing
@@ -316,21 +342,35 @@ The script refuses to run without elevation and refuses to replace a non-PE `boo
 
 Before Windows starts, the loader writes the signed `bootmgfw.efi` back, then starts it. The boot that just entered Windows has no loader menu. The task puts the wrapper back, so the next reboot shows the menu. There is no target list on this path. It starts Windows on this volume only.
 
+Windows' `Secure-Boot-Update` task can overwrite that path again ([#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)); Boot Guard only repairs after the next successful Windows start, so a fast reboot can miss the loader.
+
+### FirmwareEntry mode
+
+Leaves Microsoft's `bootmgfw.efi` alone. Copies the loader to `EFI\turing-unlock\TuringUnlockLoader.efi`, creates a firmware NVRAM boot entry that points at that path, and registers `GpuUnlock Boot Order Guard` (startup + hourly) so `{fwbootmgr}` displayorder stays first. Field notes: [#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6). Unlock with Secure Boot on: [#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Install-GpuUnlockBoot.ps1 -InstallMode FirmwareEntry -LoaderEfi C:\path\to\UnlockLoader-Turing.efi -FirmwareDir .\assets\firmware\Turing
+```
+
+The unmodified loader still chainloads `\EFI\Microsoft\Boot\bootmgfw.efi`. When that file is already Microsoft's, it does not rewrite it. **WU still rewrites `bootmgfw.efi`**; FirmwareEntry only means that rewrite is no longer competing with the unlock EFI. Suspend BitLocker before the first trial boot after this layout (or after a bootmgr update).
+
 | Parameter | Meaning |
 | --- | --- |
+| `-InstallMode Replace` | default: wrapper as `bootmgfw.efi` + Boot Guard |
+| `-InstallMode FirmwareEntry` | own firmware boot entry; leave `bootmgfw.efi` alone + Boot Order Guard |
 | `-TimeoutSec 20` | menu timeout |
 | `-DefaultAction skip` | `skip` or `inject` |
-| `-AlsoFallback` | also replace `\EFI\Boot\bootx64.efi` when it matches the original bootmgfw |
+| `-AlsoFallback` | Replace mode only: also replace `\EFI\Boot\bootx64.efi` when it matches the original bootmgfw |
 | `-SkipScheduledTask` | do not register the guard task |
 | `-FirmwareDir <dir>` | copy that arch's blobs onto the ESP |
 
 Re-run Install after you replace the EFI, or the ESP still has the old loader.
 
-While Windows still boots, elevated `.\tools\Uninstall-GpuUnlockBoot.ps1` restores `bootmgfw.efi` and removes the task. `-Purge` also deletes `EFI\turing-unlock\`, including firmware blobs.
+While Windows still boots, elevated `.\tools\Uninstall-GpuUnlockBoot.ps1` restores `bootmgfw.efi` if needed, removes firmware boot entries / both guard tasks. `-Purge` also deletes `EFI\turing-unlock\`, including firmware blobs.
 
 `Copy-GpuUnlockLog.ps1` reads `unlock.log` from the internal ESP into `logs\`. A USB stick keeps its own log. This script does not read the stick.
 
-A healthy ESP skip looks like:
+A healthy Replace-mode ESP skip looks like:
 
 ```
 Inject skipped. Continuing to boot.
@@ -341,9 +381,26 @@ Starting EFI loader...
 
 | Symptom | What to do |
 | --- | --- |
-| Firmware boots Windows with no menu | Expected once after the loader restores Microsoft's file. The next reboot should show the menu. If it still skips, turn Secure Boot off or run `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
-| Menu gone after one successful Windows boot | Wait about a minute (`C:\ProgramData\GpuUnlock\protect.log`), or register the task again |
+| Firmware boots Windows with no menu (Replace) | Expected once after the loader restores Microsoft's file. The next reboot should show the menu. If it still skips, turn Secure Boot off or run `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
+| Firmware boots Windows with no menu (FirmwareEntry) | BootOrder dropped the entry, or Secure Boot rejected an unsigned loader. Run `Protect-GpuUnlockBoot.ps1 -RegisterTask`, confirm the GPU Unlock entry is first, self-sign if SB is on |
+| Menu gone after one successful Windows boot (Replace) | Wait about a minute (`C:\ProgramData\GpuUnlock\protect.log`), or register the task again |
 | `0xc0000428` | The official path is still the unsigned loader. Use the copy in [If the machine will not start](#if-the-machine-will-not-start) |
+
+---
+
+## Self-signing (Secure Boot)
+
+Release EFI builds are **unsigned**. With Secure Boot on, firmware will not `LoadImage` them. This repo does **not** distribute certificates or enroll keys.
+
+Community path that worked with FirmwareEntry / ESP unlock ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)):
+
+1. Create a local Authenticode code-signing certificate (machine-local; keep the private key offline).
+2. In the OEM BIOS Secure Boot key manager, **enroll the public key into firmware `db`**. Keep Microsoft / OEM keys. Do not clear `PK`/`KEK`/`db` unless you know how to recover. Incorrect `db` edits can leave the machine unable to trust Windows boot files.
+3. Sign `UnlockLoader-<Arch>.efi` (or the installed `TuringUnlockLoader.efi`) with that cert. No shim / MOK was required in that report.
+4. Install with `-InstallMode FirmwareEntry` (or boot a signed copy from USB with Secure Boot still on). Prefer FirmwareEntry over Replace when Secure Boot stays on.
+5. BitLocker may ask for the recovery key after the first boot that changes the Authenticode chain (PCR 4). Suspend BitLocker for one reboot when you change the signed loader or Microsoft's bootmgr build.
+
+Agent tip: if the user wants Secure Boot on, require self-sign + `db` enroll before FirmwareEntry; otherwise prefer USB with Secure Boot off. Self-signing does not stop Windows Update from rewriting `bootmgfw.efi`.
 
 ---
 
@@ -530,6 +587,8 @@ NVIDIA firmware stays under NVIDIA's license and is not in git.
 ---
 
 ## Changelog
+
+Tools/docs (same EFI `0.2.14`): `Install-GpuUnlockBoot.ps1 -InstallMode FirmwareEntry` adds an own firmware NVRAM boot entry and leaves Microsoft's `bootmgfw.efi` alone (Boot Order Guard). Replace mode remains the install default. README adds a boot-path comparison (USB still recommended), self-signing notes, an explicit warning that FirmwareEntry does **not** stop Windows Update from rewriting `bootmgfw.efi` ([#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)), and the RTX 2080 Ti Rev. A community success report ([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)).
 
 `0.2.14` writes one log per boot, `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log`, instead of overwriting `unlock.log`. Every file line starts with `[YYYY-MM-DD HH:MM:SS]`. The log is flushed when inject starts, after inject returns, and again immediately before `StartImage`, so a reset during a black screen can still show whether Windows Boot Manager was entered.
 

@@ -1,8 +1,9 @@
 > [!IMPORTANT]
-> 这些测试都关闭了 Secure Boot。
+> 多数测试关闭了 Secure Boot。有一份社区报告在 Secure Boot 开启（自签证书进 `db`）下成功。
 >
 > - **TITAN RTX**（TU102，`10de:1e02`），Windows 10，驱动 617.42。Loader 打印 `TU102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。8192 的 FP16 GEMM 保持 99.3 → 99.1 TFLOPS。这张卡出厂已是满速。
 > - **RTX 3070 Ti**（GA104，`10de:2482`） ([#2](https://github.com/mirabarukaso/nv_unlock_win/issues/2))，Windows 10，驱动 617.42。Loader 打印 `GA102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。启动过程中会黑屏大约 1 分钟，别慌。8192 的 FP16 GEMM（FP32 累加）从 48.5 升到 86.3 TFLOPS（+78%）。
+> - **RTX 2080 Ti Rev. A**（TU102，`10de:1e07`）([#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5))，Windows 11，驱动 621.24，loader 0.2.14。Secure Boot **开启**（自签证书写入固件 `db`）。`TU102 FEAT UNLOCKED`；无 Code 43。cuBLAS FP16 GEMM 解锁信号（FP32 累加 / FP16 累加吞吐比）约 0.55（锁定）→ 约 0.97（解锁）。FLR/TDR 可能清掉解锁，直到下次经 loader 启动。
 > - **RTX 4080**（AD103，`10de:2704`）在 Windows 11 + UEFI loader **0.2.12** 上可用，驱动 617.42 — FP16 98.6→160.4 TFLOPS（+63%），BF16 98.4→163.7（+66%）（[#3](https://github.com/mirabarukaso/nv_unlock_win/issues/3)）。需要 `rtx4080_experimental=1` 以及 `targets` 里的**精确** PCI BDF（不能用 `all`）。详情：**[docs/RTX40_Ada_zh.md](docs/RTX40_Ada_zh.md)**。
 > - **RTX 4090**（AD102，`10de:2684`）— **需重新验证**。Loader 打印 `AD102 FEAT UNLOCKED`，`SS0=88888888` `SS1=8`。Windows 正常启动。此前发布的 Windows GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 ID `2684` 的配置支持不变。
 
@@ -41,20 +42,22 @@ Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，�
 
 **高级**
 
-10. [ESP 安装](#esp-安装)
+10. [选择启动路径](#选择启动路径)（优先 U 盘）
+11. [ESP 安装](#esp-安装)
+12. [自签名（Secure Boot）](#自签名secure-boot)
 
 **从头编译**
 
-11. [准备条件](#准备条件)
-12. [下载工具链](#下载工具链)
-13. [准备和编译](#准备和编译)
-14. [清理](#清理)
-15. [Hyper-V 虚拟机](#hyper-v-虚拟机)
-16. [编译排障](#编译排障)
-17. [布局](#布局)
+13. [准备条件](#准备条件)
+14. [下载工具链](#下载工具链)
+15. [准备和编译](#准备和编译)
+16. [清理](#清理)
+17. [Hyper-V 虚拟机](#hyper-v-虚拟机)
+18. [编译排障](#编译排障)
+19. [布局](#布局)
 
-18. [许可证](#许可证)
-19. [更新记录](#更新记录)
+20. [许可证](#许可证)
+21. [更新记录](#更新记录)
 
 ---
 
@@ -62,9 +65,11 @@ Turing、Ampere、Ada 的未签名 EFI loader。从一块 FAT32 U 盘启动，�
 
 ### 开始之前
 
-**关闭 Secure Boot。** Loader 未签名。Secure Boot 开着时固件不会加载它。
+**优先用 U 盘。** 它不改写内部 ESP。做任何 ESP 安装前先看 [选择启动路径](#选择启动路径)。
 
-试 [ESP 安装](#esp-安装) 之前，准备好 WinPE 或能启动的 Windows 安装盘。U 盘路径不改内部 ESP，固件菜单仍能启动你原来的磁盘。只有 ESP 上的 `bootmgfw.efi` 被替换之后，这张盘才用得上。
+除非你给 loader [自签名](#自签名secure-boot) 并把证书写入固件 `db`，否则请**关闭 Secure Boot**。Release 里的 EFI 未签名；Secure Boot 开着时固件不会加载它。
+
+试 [ESP 安装](#esp-安装) 之前，准备好 WinPE 或能启动的 Windows 安装盘。U 盘路径不改内部 ESP，固件菜单仍能启动你原来的磁盘。只有 ESP 上的 `bootmgfw.efi` 被替换之后（Replace 模式），这张盘才用得上。
 
 EFI 要和 GPU 架构一致。Turing 的 firmware 不能解 Ampere 或 Ada。
 
@@ -177,7 +182,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Hide-GpuUnlockEsp.ps1
 | 系列 | 芯片 | 代码中的 PCI ID（`10de:`） | 显卡 | 状态 |
 | --- | --- | --- | --- | --- |
 | 20 | TU102 | `1e02`（不在列表，按范围匹配） | TITAN RTX | **已验证（本仓库）**：强制注入成功，无提升（出厂满血） |
-| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **上游已验证**（nlzy，Dell 2080 Ti） |
+| 20 | TU102 | `1e07` | RTX 2080 Ti Rev. A | **上游已验证**（nlzy）+ **本仓库社区 Windows 验证**（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)，Rev. A，SB 开） |
 | 20 | TU102 | `1e03 1e04 1e2d 1e2e` | RTX 2080 Ti 12GB / 2080 Ti / 工程样品 | 在列表，未测试 |
 | 20 | TU104 | `1e81 1e82 1e84 1e87 1e89 1ec2 1ec7` | RTX 2080 SUPER / 2080 / 2070 SUPER / 2080 Rev. A / 2060 | 在列表，未测试 |
 | 20 | TU106 | `1f02 1f03 1f06 1f07 1f08 1f42 1f47` | RTX 2070 / 2060 12GB / 2060 SUPER / 2070 Rev. A / 2060 Rev. A | 在列表，未测试 |
@@ -282,9 +287,11 @@ Skip：SM 2010 MHz，大约 283–296 W。注入后：SM 1815 MHz，大约 309 W
 
 **RTX 4090**（`10de:2684`，AD102）— **需重新验证。** Loader 0.2.7 打印 `AD102 FEAT UNLOCKED`，交接 `PLM=ffffffff SS0=88888888 SS1=8`；Windows 正常启动。本 SKU 此前发布的 Windows cuBLAS FP16 GEMM 数字已**暂时撤回**，等待重测（解锁后的 4080 0.2.12 MMA 已超过旧数字）。基线 Ada 配置（`2684`）不变。
 
+**RTX 2080 Ti Rev. A**（`10de:1e07`，TU102），社区（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)）：Windows 11 build 26300，驱动 621.24，loader 0.2.14，Secure Boot 开启并自签证书写入固件 `db`。日志：`TU102 FEAT UNLOCKED`，交接 `ss0=0x88888888 ss1=0x00000008`。无 Code 43；`nvidia-smi` 可用。解锁核对用的是 cuBLAS FP16 GEMM 的 FP32 累加 / FP16 累加吞吐比（约 0.55 锁定 → 约 0.97 解锁，8192）。之后一次 GSP fault / 类似 FLR 的恢复把比值打回接近锁定，直到下次经 loader 启动。完整日志与 BitLocker/PCR4 说明见该 issue。
+
 在 Ada 上，寄存器驻留的指令发射率探针（如 `mma_bench_sm89`）与大尺寸 cuBLAS GEMM 经常差很多：GEMM 往往顶在功耗墙上。解锁证明请优先用发射率探针。
 
-GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很高，可能损坏硬件。
+Tensor core 满速功耗很高，可能损坏硬件。非 A 的 `1e04` 在 [#1](https://github.com/mirabarukaso/nv_unlock_win/issues/1) 仍有 Code 43 报告；不要把 #5 当成所有 2080 Ti 板卡都已验证。
 
 ### 使用时排障
 
@@ -300,13 +307,32 @@ GeForce 2080 Ti 上的注入尚未在本树验证。Tensor core 满速功耗很�
 
 ---
 
+## 选择启动路径
+
+给操作者 / agent：能用 U 盘就用 U 盘。**不要**为了 chainload 把微软的 `\EFI\Microsoft\Boot\bootmgfw.efi` 改成别的文件名——Windows Boot Manager / winload 会校验这个名字（恢复环境常见 `0xc0000428`）。
+
+| 路径 | 是否动 ESP 上的 `bootmgfw` | Secure Boot | Windows Update 回写 | BitLocker / PCR4 | 主要残留风险 | 何时用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| U 盘（`New-GpuUnlockUsb.ps1`） | 否 | 关（未签名） | 不适用（不改内部 ESP） | U 盘一般不在封印路径里 | 每次要从 U 盘启动 | **默认 / 推荐** |
+| ESP `FirmwareEntry` | 否（loader 自有 NVRAM 启动项） | 仅当 [自签名](#自签名secure-boot) 并写入 `db` | **仍会发生** — WU / `Secure-Boot-Update` 继续写微软的 `bootmgfw.efi`；只是 loader 不再是那个文件 | 微软 bootmgr 换 build / BootOrder 变化可能要恢复密钥 | BootOrder 被挤掉；bootmgr 更新后的 PCR4；证据少于 U 盘 | 必须留在内部 ESP 且要开 Secure Boot、要避开 Replace 模式的*竞态* — **不是** WU 免疫 |
+| ESP `Replace` | 是（包装器顶替 + Boot Guard） | 关 | WU 会把 **loader** 写回成官方 `bootmgfw.efi` | 同样对 PCR 敏感 | 快速重启错过解锁；还原失败时 `0xc0000428` | Secure Boot 关闭时的旧式 ESP 路径 |
+
+> [!WARNING]
+> **FirmwareEntry 并不能阻止 Windows Update 回写启动文件。**（[#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)）它改变的是：更新可以照常覆盖 `bootmgfw.efi`；解锁 loader 在 `\EFI\turing-unlock\`，这次覆盖不再直接删掉解锁 EFI。它**修不了**：新的微软 bootmgr build 带来的 PCR4 / BitLocker；BIOS 或功能更新后 `{fwbootmgr}` 被重排。大更新后请再确认 BootOrder。能插 U 盘时仍优先 U 盘。
+
+改 ESP 布局或 bootmgr 更新之后，需要时先挂起 BitLocker 一次重启：`Suspend-BitLocker -MountPoint C: -RebootCount 1`。
+
+---
+
 ## ESP 安装
 
-这条路径会替换内部 ESP 上的 `\EFI\Microsoft\Boot\bootmgfw.efi`，并注册开机任务。先准备好 WinPE 或 Windows 安装盘。不想动这块分区时，用上面的 U 盘。
+内部 ESP 上有两种模式。先准备好 WinPE 或 Windows 安装盘。不想动这块分区时，仍用上面的 U 盘。
 
 出厂 ESP 常见大约 100 MB。Turing 的 firmware 放得进现有 Windows 启动文件旁边。Ampere 和 Ada 各要一份大约 80 MB 的 `gsp_ga10x.bin`，出厂 ESP 在 `bootmgfw.efi` 旁边放不下。把 ESP 加大是你自己做的事，用你手头的分区工具即可，例如 MiniTool Partition Wizard。这里不写这些工具的用法。空间够了之后，Ampere 和 Ada 用同一条安装命令。
 
-在目标 Windows 上用管理员 PowerShell：
+### Replace 模式（默认）
+
+用 loader 替换 `\EFI\Microsoft\Boot\bootmgfw.efi`，并注册 Boot Guard。在目标 Windows 上用管理员 PowerShell：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Install-GpuUnlockBoot.ps1 -LoaderEfi C:\path\to\UnlockLoader-Turing.efi -FirmwareDir .\assets\firmware\Turing
@@ -316,21 +342,35 @@ powershell -ExecutionPolicy Bypass -File .\tools\Install-GpuUnlockBoot.ps1 -Load
 
 进 Windows 之前，loader 把签名的 `bootmgfw.efi` 写回去再启动它。刚刚进入 Windows 的这一次没有 loader 菜单。任务再把包装器贴回去，下一次重启才会看到菜单。这条路径没有启动项列表，只启动本卷上的 Windows。
 
+Windows 的 `Secure-Boot-Update` 任务会再次覆盖该路径（[#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)）；Boot Guard 只在下次成功进 Windows 后修补，因此快速重启可能错过 loader。
+
+### FirmwareEntry 模式
+
+不动微软的 `bootmgfw.efi`。把 loader 拷到 `EFI\turing-unlock\TuringUnlockLoader.efi`，创建指向该路径的固件 NVRAM 启动项，并注册 `GpuUnlock Boot Order Guard`（开机 + 每小时），尽量让 `{fwbootmgr}` displayorder 保持第一。现场说明见 [#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)。Secure Boot 开启下的解锁见 [#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Install-GpuUnlockBoot.ps1 -InstallMode FirmwareEntry -LoaderEfi C:\path\to\UnlockLoader-Turing.efi -FirmwareDir .\assets\firmware\Turing
+```
+
+未改过的 loader 仍会 chainload `\EFI\Microsoft\Boot\bootmgfw.efi`。该文件已是微软原件时不会再写。**WU 仍会回写 `bootmgfw.efi`**；FirmwareEntry 只表示这次回写不再和解锁 EFI 抢同一个文件。首次试用该布局（或 bootmgr 更新后）前请挂起 BitLocker。
+
 | 参数 | 含义 |
 | --- | --- |
+| `-InstallMode Replace` | 默认：包装器作为 `bootmgfw.efi` + Boot Guard |
+| `-InstallMode FirmwareEntry` | 自有固件启动项；不动 `bootmgfw.efi` + Boot Order Guard |
 | `-TimeoutSec 20` | 菜单秒数 |
 | `-DefaultAction skip` | `skip` 或 `inject` |
-| `-AlsoFallback` | `\EFI\Boot\bootx64.efi` 与原版 bootmgfw 相同时一并替换 |
+| `-AlsoFallback` | 仅 Replace：`\EFI\Boot\bootx64.efi` 与原版 bootmgfw 相同时一并替换 |
 | `-SkipScheduledTask` | 不注册守护任务 |
 | `-FirmwareDir <dir>` | 把该架构的 blob 拷进 ESP |
 
 换了 EFI 之后要再跑一次 Install，否则 ESP 上还是旧 loader。
 
-Windows 还能进时，管理员运行 `.\tools\Uninstall-GpuUnlockBoot.ps1` 会还原 `bootmgfw.efi` 并删掉任务。`-Purge` 还会删除 `EFI\turing-unlock\`，包括 firmware blob。
+Windows 还能进时，管理员运行 `.\tools\Uninstall-GpuUnlockBoot.ps1` 会在需要时还原 `bootmgfw.efi`，并删除固件启动项 / 两种守护任务。`-Purge` 还会删除 `EFI\turing-unlock\`，包括 firmware blob。
 
 `Copy-GpuUnlockLog.ps1` 把内部 ESP 上的 `unlock.log` 拷到 `logs\`。U 盘的日志留在 U 盘上，这个脚本不读 U 盘。
 
-ESP 上正常跳过大致是：
+Replace 模式下正常跳过大致是：
 
 ```
 Inject skipped. Continuing to boot.
@@ -341,9 +381,26 @@ Starting EFI loader...
 
 | 现象 | 处理 |
 | --- | --- |
-| 固件直接进 Windows，没有菜单 | loader 刚把微软原件写回去时，这一轮没有菜单是预期。下次重启应出现。若仍没有：关 Secure Boot，或跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
-| 进一次 Windows 后菜单消失 | 等约 1 分钟（看 `C:\ProgramData\GpuUnlock\protect.log`），或重新注册任务 |
+| 固件直接进 Windows，没有菜单（Replace） | loader 刚把微软原件写回去时，这一轮没有菜单是预期。下次重启应出现。若仍没有：关 Secure Boot，或跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask` |
+| 固件直接进 Windows，没有菜单（FirmwareEntry） | BootOrder 丢了启动项，或 Secure Boot 拒收未签名 loader。跑 `Protect-GpuUnlockBoot.ps1 -RegisterTask`，确认 GPU Unlock 项仍在第一，SB 开着则需自签名 |
+| 进一次 Windows 后菜单消失（Replace） | 等约 1 分钟（看 `C:\ProgramData\GpuUnlock\protect.log`），或重新注册任务 |
 | `0xc0000428` | 官方路径上还是未签名 loader。按 [机器起不来](#机器起不来) 拷回备份 |
+
+---
+
+## 自签名（Secure Boot）
+
+Release 的 EFI **未签名**。Secure Boot 开着时固件不会 `LoadImage`。本仓库**不**分发证书，也不替你注册密钥。
+
+与 FirmwareEntry / ESP 解锁配合、社区可用的路径（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)）：
+
+1. 在本机生成 Authenticode 代码签名证书（私钥离线保管）。
+2. 在主板 BIOS 的 Secure Boot 密钥管理里，把**公钥注册进固件 `db`**。保留微软 / OEM 密钥。不要清 `PK`/`KEK`/`db`，除非你知道如何恢复。错误改 `db` 可能导致机器不再信任 Windows 启动文件。
+3. 用该证书签名 `UnlockLoader-<Arch>.efi`（或已安装的 `TuringUnlockLoader.efi`）。该报告未使用 shim / MOK。
+4. 用 `-InstallMode FirmwareEntry` 安装（或在 Secure Boot 仍开时从 U 盘启动已签名副本）。要开 Secure Boot 时优先 FirmwareEntry，不要用 Replace。
+5. 首次改变 Authenticode 链路（PCR 4）的启动，BitLocker 可能要恢复密钥。更换已签名 loader 或微软 bootmgr build 时，先挂起 BitLocker 一次重启。
+
+Agent 提示：用户要开 Secure Boot 时，先自签并写入 `db` 再做 FirmwareEntry；否则优先关 Secure Boot 用 U 盘。自签名**不能**阻止 Windows Update 回写 `bootmgfw.efi`。
 
 ---
 
@@ -530,6 +587,8 @@ NVIDIA firmware 仍受 NVIDIA 许可约束，不在 git 里。
 ---
 
 ## 更新记录
+
+工具 / 文档（EFI 仍为 `0.2.14`）：`Install-GpuUnlockBoot.ps1 -InstallMode FirmwareEntry` 增加自有固件 NVRAM 启动项，并保留微软的 `bootmgfw.efi`（Boot Order Guard）。Replace 仍是安装默认。README 增加启动路径对比（仍优先 U 盘）、自签名说明、明确写出 FirmwareEntry **不能**阻止 Windows Update 回写 `bootmgfw.efi`（[#6](https://github.com/mirabarukaso/nv_unlock_win/issues/6)），以及 RTX 2080 Ti Rev. A 社区成功报告（[#5](https://github.com/mirabarukaso/nv_unlock_win/issues/5)）。
 
 `0.2.14` 每次启动写一份日志 `\EFI\turing-unlock\unlock-YYYYMMDD-HHMMSS.log`，不再覆盖 `unlock.log`。文件里每一行以 `[YYYY-MM-DD HH:MM:SS]` 开头。Inject 开始时、Inject 返回后、以及 `StartImage` 之前各落盘一次，黑屏期间复位仍能看出有没有进入 Windows Boot Manager。
 
