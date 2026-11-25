@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Restore Microsoft bootmgfw.efi and drop the GPU Unlock scheduled task.
+# Remove an ESP install (Replace or FirmwareEntry).
+# Replace: restore Microsoft bootmgfw.efi and drop the Boot Guard task.
+# FirmwareEntry: delete the firmware NVRAM boot entry and the Boot Order guard;
+#   leave/restore official bootmgfw.efi.
 # ESP on-disk directory stays EFI\turing-unlock (loader path / magic).
 # -Purge also deletes that directory (loader, backups, firmware blobs) and
 # EFI\Microsoft\Boot\bootmgfw_ms.efi.
@@ -19,6 +22,22 @@ $backupAlt = Join-Path $Esp $script:MsBackupAltRel
 $espDir = Join-Path $Esp $script:DirRel
 $fwDir = Join-Path $espDir 'firmware'
 $state = Get-InstallState $Esp
+$mode = Get-GpuUnlockInstallMode $state
+
+Write-Host "Uninstall mode: $mode"
+
+Unregister-GpuUnlockProtectTasks
+Write-Host 'Removed GpuUnlock scheduled tasks (Boot Guard / Boot Order Guard) if present.'
+
+$entryId = $null
+if ($state -and $state.firmwareEntryId) {
+    $entryId = [string]$state.firmwareEntryId
+}
+if ($mode -eq 'FirmwareEntry' -or $entryId) {
+    if ($PSCmdlet.ShouldProcess('firmware entry', 'Remove GPU Unlock firmware boot entry')) {
+        Remove-GpuUnlockFirmwareEntry -EntryId $entryId
+    }
+}
 
 $source = $null
 foreach ($candidate in @($backup, $backupAlt)) {
@@ -27,24 +46,27 @@ foreach ($candidate in @($backup, $backupAlt)) {
         break
     }
 }
-if (-not $source) {
-    throw "No original bootmgfw backup found under $Esp. Do not delete the wrapper until a Microsoft bootmgfw.efi is restored from installation media."
+
+if (Test-WrapperFile $MsBoot) {
+    if (-not $source) {
+        throw "No original bootmgfw backup found under $Esp. Do not delete the wrapper until a Microsoft bootmgfw.efi is restored from installation media."
+    }
+    if ($PSCmdlet.ShouldProcess($MsBoot, "Restore from $source")) {
+        Copy-Item -LiteralPath $source -Destination $MsBoot -Force
+        Write-Host "Restored Windows Boot Manager from $source"
+    }
+} elseif ($source) {
+    Write-Host "bootmgfw.efi is already a non-wrapper PE; left in place (backup at $source)."
+} else {
+    Write-Host 'No bootmgfw_ms.efi backup found; bootmgfw.efi left as-is.'
 }
 
-if ($PSCmdlet.ShouldProcess($MsBoot, "Restore from $source")) {
-    Copy-Item -LiteralPath $source -Destination $MsBoot -Force
-}
-
-if ($state -and $state.replacedFallback) {
+if ($state -and $state.replacedFallback -and $source) {
     $fallback = Join-Path $Esp $script:FallbackRel
     if (Test-WrapperFile $fallback) {
         Copy-Item -LiteralPath $source -Destination $fallback -Force
         Write-Host "Restored $fallback"
     }
-}
-
-foreach ($name in @($script:TaskName, $script:LegacyTaskName)) {
-    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 if ($Purge) {
@@ -90,4 +112,4 @@ if ($Purge) {
     Write-Host "Kept $script:DirRel (loader, bootmgfw backups, firmware blobs). Use -Purge to delete them."
 }
 
-Write-Host "Uninstall complete. Windows Boot Manager restored from $source"
+Write-Host 'Uninstall complete.'
